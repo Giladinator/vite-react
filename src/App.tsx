@@ -1,15 +1,45 @@
 import React, { useState } from 'react';
 import { AlertCircle, Download, RefreshCw, Users, DollarSign, TrendingUp, TrendingDown } from 'lucide-react';
 
-const DeelPayrollApp = () => {
-  const [apiKey, setApiKey] = useState('');
-  const [isAuthenticated, setIsAuthenticated] = useState(false);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState('');
-  const [payrollData, setPayrollData] = useState(null);
+// Type Definitions
+interface Employee {
+  id: number;
+  name: string;
+  role: string;
+  country: string;
+  salary: number;
+  bonus: number;
+  deductions: number;
+  net: number;
+  status: 'Paid' | 'Processing' | 'Pending';
+}
+
+interface PayrollCycle {
+  cycle: string;
+  totalCost: number;
+  employeeCount: number;
+  employees: Employee[];
+}
+
+interface PayrollData {
+  current: PayrollCycle;
+  previous: PayrollCycle;
+}
+
+interface DifferenceCalculation {
+  diff: number;
+  percentChange: string;
+}
+
+const DeelPayrollApp: React.FC = () => {
+  const [apiKey, setApiKey] = useState<string>('');
+  const [isAuthenticated, setIsAuthenticated] = useState<boolean>(false);
+  const [loading, setLoading] = useState<boolean>(false);
+  const [error, setError] = useState<string>('');
+  const [payrollData, setPayrollData] = useState<PayrollData | null>(null);
 
   // Mock data for demonstration (replace with actual API calls)
-  const mockPayrollData = {
+  const mockPayrollData: PayrollData = {
     current: {
       cycle: 'September 2025',
       totalCost: 245780.50,
@@ -36,7 +66,7 @@ const DeelPayrollApp = () => {
     }
   };
 
-  const handleAuthenticate = async () => {
+  const handleAuthenticate = async (): Promise<void> => {
     if (!apiKey.trim()) {
       setError('Please enter your Deel API key');
       return;
@@ -53,7 +83,7 @@ const DeelPayrollApp = () => {
     }, 1000);
   };
 
-  const fetchPayrollData = async () => {
+  const fetchPayrollData = async (): Promise<void> => {
     setLoading(true);
     setError('');
     
@@ -64,24 +94,24 @@ const DeelPayrollApp = () => {
     }, 1500);
   };
 
-  const calculateDifference = (current, previous) => {
+  const calculateDifference = (current: number, previous: number): DifferenceCalculation => {
     const diff = current - previous;
-    const percentChange = previous !== 0 ? ((diff / previous) * 100).toFixed(1) : 0;
+    const percentChange = previous !== 0 ? ((diff / previous) * 100).toFixed(1) : '0';
     return { diff, percentChange };
   };
 
-  const exportToCSV = () => {
+  const exportToCSV = (): void => {
     if (!payrollData) return;
     
-    const csvRows = [
+    const csvRows: string[][] = [
       ['Payroll Comparison Report', '', '', '', '', '', ''],
       ['Current Cycle:', payrollData.current.cycle, '', 'Previous Cycle:', payrollData.previous.cycle],
       [''],
       ['Employee Name', 'Role', 'Country', 'Current Salary', 'Previous Salary', 'Difference', 'Status'],
     ];
 
-    payrollData.current.employees.forEach(emp => {
-      const prevEmp = payrollData.previous.employees.find(e => e.id === emp.id);
+    payrollData.current.employees.forEach((emp: Employee) => {
+      const prevEmp = payrollData.previous.employees.find((e: Employee) => e.id === emp.id);
       const prevSalary = prevEmp ? prevEmp.net : 0;
       const diff = emp.net - prevSalary;
       
@@ -103,6 +133,7 @@ const DeelPayrollApp = () => {
     a.href = url;
     a.download = `payroll_comparison_${Date.now()}.csv`;
     a.click();
+    window.URL.revokeObjectURL(url);
   };
 
   if (!isAuthenticated) {
@@ -172,7 +203,7 @@ const DeelPayrollApp = () => {
   const costDiff = payrollData ? calculateDifference(
     payrollData.current.totalCost,
     payrollData.previous.totalCost
-  ) : { diff: 0, percentChange: 0 };
+  ) : { diff: 0, percentChange: '0' };
 
   const employeeDiff = payrollData ? 
     payrollData.current.employeeCount - payrollData.previous.employeeCount : 0;
@@ -217,7 +248,7 @@ const DeelPayrollApp = () => {
                 </div>
                 <div className={`flex items-center gap-1 text-sm font-semibold ${costDiff.diff >= 0 ? 'text-red-600' : 'text-green-600'}`}>
                   {costDiff.diff >= 0 ? <TrendingUp size={16} /> : <TrendingDown size={16} />}
-                  {Math.abs(costDiff.percentChange)}%
+                  {Math.abs(Number(costDiff.percentChange))}%
                 </div>
               </div>
               <h3 className="text-gray-600 text-sm mb-1">Total Payroll Cost</h3>
@@ -287,8 +318,8 @@ const DeelPayrollApp = () => {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-200">
-                  {payrollData.current.employees.map((emp) => {
-                    const prevEmp = payrollData.previous.employees.find(e => e.id === emp.id);
+                  {payrollData.current.employees.map((emp: Employee) => {
+                    const prevEmp = payrollData.previous.employees.find((e: Employee) => e.id === emp.id);
                     const prevNet = prevEmp ? prevEmp.net : 0;
                     const change = emp.net - prevNet;
                     const isNew = !prevEmp;
