@@ -2,10 +2,11 @@ import axios from 'axios';
 
 // Create a configured instance of axios for the Deel API
 const deelApi = axios.create({
-  baseURL: 'https://api-sandbox.demo.deel.com/rest/v2', // Corrected to sandbox URL
+  baseURL: 'https://api-sandbox.demo.deel.com/rest/v2',
   headers: {
     'Content-Type': 'application/json',
   },
+  timeout: 30000, // 30 second timeout
 });
 
 /**
@@ -17,26 +18,55 @@ const deelApi = axios.create({
  */
 export const callDeelApi = async <T>(endpoint: string, apiKey: string): Promise<T> => {
     try {
-        console.log(`Sending API Request to: ${endpoint}`);
+        console.log(`[API] Sending request to: ${endpoint}`);
+        console.log(`[API] Full URL: ${deelApi.defaults.baseURL}${endpoint}`);
+        
         const response = await deelApi.get(endpoint, {
             headers: {
                 'Authorization': `Bearer ${apiKey}`,
             }
         });
-        // SIMPLIFIED: Always return the main data object.
-        // The component will be responsible for handling nested 'data' properties if they exist.
+        
+        console.log(`[API] Response status: ${response.status}`);
+        console.log(`[API] Response data type:`, Array.isArray(response.data) ? 'Array' : typeof response.data);
+        console.log(`[API] Response data:`, response.data);
+        
+        // Return the full response data - let the calling code handle the structure
         return response.data as T;
     } catch (error: any) {
         if (error.response) {
-            console.error('Deel API Error:', error.response.status, error.response.data);
-            const errorMessage = error.response.data?.errors?.[0]?.message || `API error: ${error.response.status}`;
+            // Server responded with error status
+            console.error('[API] Error response:', {
+                status: error.response.status,
+                statusText: error.response.statusText,
+                data: error.response.data,
+                headers: error.response.headers
+            });
+            
+            // Try to extract a meaningful error message
+            let errorMessage = `API error: ${error.response.status}`;
+            
+            if (error.response.data) {
+                if (typeof error.response.data === 'string') {
+                    errorMessage = error.response.data;
+                } else if (error.response.data.errors && Array.isArray(error.response.data.errors)) {
+                    errorMessage = error.response.data.errors.map((e: any) => e.message || e).join(', ');
+                } else if (error.response.data.message) {
+                    errorMessage = error.response.data.message;
+                } else if (error.response.data.error) {
+                    errorMessage = error.response.data.error;
+                }
+            }
+            
             throw new Error(errorMessage);
         } else if (error.request) {
-            console.error('Deel API Error: No response received', error.request);
-            throw new Error('Failed to fetch data from Deel API. No response received.');
+            // Request made but no response received
+            console.error('[API] No response received:', error.request);
+            throw new Error('Failed to fetch data from Deel API. No response received. Check your internet connection.');
         } else {
-            console.error('Error', error.message);
-            throw new Error('An unknown error occurred while setting up the API request.');
+            // Error in request setup
+            console.error('[API] Request setup error:', error.message);
+            throw new Error(`An error occurred: ${error.message}`);
         }
     }
 };
