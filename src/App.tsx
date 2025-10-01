@@ -46,7 +46,7 @@ interface DifferenceCalculation {
 }
 
 // --- API Helper ---
-const callDeelApi = async <T>(endpoint: string, apiKey: string): Promise<T> => {
+const callDeelApi = async <T,>(endpoint: string, apiKey: string): Promise<T> => {
   const API_BASE_URL = 'https://api.letsdeel.com/rest/v2';
   const response = await fetch(`${API_BASE_URL}${endpoint}`, {
     headers: {
@@ -96,13 +96,13 @@ const DeelPayrollApp: React.FC = () => {
       if (previousReport) {
         payslipPromises.push(callDeelApi<DeelPayslip[]>(`/gp/reports/${previousReport.id}/payslips`, apiKey));
       } else {
-        payslipPromises.push(Promise.resolve([])); // Add empty promise if no previous report
+        payslipPromises.push(Promise.resolve([]));
       }
 
       const [currentPayslips, previousPayslips] = await Promise.all(payslipPromises);
       
       const formatCycle = (report: DeelPayrollReport, payslips: DeelPayslip[]): PayrollCycle => {
-        const date = new Date(report.start_date + 'T00:00:00Z'); // Assume UTC to avoid timezone issues
+        const date = new Date(report.start_date + 'T00:00:00Z');
         const month = date.toLocaleString('default', { month: 'long', timeZone: 'UTC' });
         const year = date.getUTCFullYear();
         
@@ -160,9 +160,11 @@ const DeelPayrollApp: React.FC = () => {
           placeholder="Enter your Deel API Key"
           className="w-full px-4 py-3 rounded-lg border border-gray-300 focus:outline-none focus:ring-2 focus:ring-blue-500 transition"
         />
-      <button onClick={handleFetchData} disabled={loading} className="p-2 rounded-lg border bg-white hover:bg-gray-50 transition flex items-center justify-center disabled:opacity-50">
-              {loading ? <Loader2 className="animate-spin" size={20} /> : <RefreshCw size={20} />}
-            </button>
+        <button
+          onClick={handleFetchData}
+          disabled={loading}
+          className="w-full bg-blue-600 text-white font-semibold py-3 px-4 rounded-lg hover:bg-blue-700 transition-all duration-200 flex items-center justify-center disabled:bg-blue-300"
+        >
           {loading ? (
             <>
               <Loader2 className="animate-spin mr-2" size={20} />
@@ -179,7 +181,7 @@ const DeelPayrollApp: React.FC = () => {
           {error}
         </div>
       )}
-       <p className="text-xs text-gray-400 mt-4 text-center">Your API key is used only for this session and is not stored.</p>
+      <p className="text-xs text-gray-400 mt-4 text-center">Your API key is used only for this session and is not stored.</p>
     </div>
   );
 
@@ -193,7 +195,7 @@ const DeelPayrollApp: React.FC = () => {
           </div>
           <div className="flex items-center space-x-2 mt-4 sm:mt-0">
             <button onClick={handleFetchData} disabled={loading} className="p-2 rounded-lg border bg-white hover:bg-gray-50 transition flex items-center justify-center disabled:opacity-50">
-                {loading ? <Loader2 className="animate-spin" size={20} /> : <RefreshCw size={20} />}
+              {loading ? <Loader2 className="animate-spin" size={20} /> : <RefreshCw size={20} />}
             </button>
             <button className="px-4 py-2 rounded-lg border bg-white hover:bg-gray-50 transition flex items-center space-x-2">
               <Download size={16} />
@@ -203,93 +205,93 @@ const DeelPayrollApp: React.FC = () => {
         </header>
 
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
-            <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
-                <div className="flex items-center text-gray-500 mb-2">
-                    <DollarSign size={16} className="mr-2" />
-                    <span>Total Payroll Cost</span>
-                </div>
-                <p className="text-3xl font-bold text-gray-800">${formatCurrency(payrollData.current.totalCost)}</p>
-                {totalCostDiff && payrollData.previous && (
-                    <div className={`flex items-center mt-2 text-sm ${totalCostDiff.diff >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-                        {totalCostDiff.diff >= 0 ? <TrendingUp size={16} className="mr-1" /> : <TrendingDown size={16} className="mr-1" />}
-                        <span>{totalCostDiff.diff >= 0 ? '+' : ''}${formatCurrency(totalCostDiff.diff)} ({totalCostDiff.percentChange}%) vs last cycle</span>
-                    </div>
-                )}
+          <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
+            <div className="flex items-center text-gray-500 mb-2">
+              <DollarSign size={16} className="mr-2" />
+              <span>Total Payroll Cost</span>
             </div>
-            <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
-                <div className="flex items-center text-gray-500 mb-2">
-                    <Users size={16} className="mr-2" />
-                    <span>Employees Paid</span>
-                </div>
-                <p className="text-3xl font-bold text-gray-800">{payrollData.current.employeeCount}</p>
-                 {employeeCountDiff && payrollData.previous && (
-                    <div className={`flex items-center mt-2 text-sm ${employeeCountDiff.diff >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-                        {employeeCountDiff.diff >= 0 ? <TrendingUp size={16} className="mr-1" /> : <TrendingDown size={16} className="mr-1" />}
-                        <span>{employeeCountDiff.diff >= 0 ? '+' : ''}{employeeCountDiff.diff.toFixed(0)} employees ({employeeCountDiff.percentChange}%) vs last cycle</span>
-                    </div>
-                )}
+            <p className="text-3xl font-bold text-gray-800">${formatCurrency(payrollData.current.totalCost)}</p>
+            {totalCostDiff && payrollData.previous && (
+              <div className={`flex items-center mt-2 text-sm ${totalCostDiff.diff >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                {totalCostDiff.diff >= 0 ? <TrendingUp size={16} className="mr-1" /> : <TrendingDown size={16} className="mr-1" />}
+                <span>{totalCostDiff.diff >= 0 ? '+' : ''}${formatCurrency(totalCostDiff.diff)} ({totalCostDiff.percentChange}%) vs last cycle</span>
+              </div>
+            )}
+          </div>
+          <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
+            <div className="flex items-center text-gray-500 mb-2">
+              <Users size={16} className="mr-2" />
+              <span>Employees Paid</span>
             </div>
-             <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
-                <div className="flex items-center text-gray-500 mb-2">
-                    <DollarSign size={16} className="mr-2" />
-                    <span>Previous Cycle Cost</span>
-                </div>
-                <p className="text-3xl font-bold text-gray-500">
-                    {payrollData.previous ? `$${formatCurrency(payrollData.previous.totalCost)}` : 'N/A'}
-                </p>
-                <p className="text-sm text-gray-400 mt-2">{payrollData.previous ? payrollData.previous.cycle : 'No previous cycle data'}</p>
+            <p className="text-3xl font-bold text-gray-800">{payrollData.current.employeeCount}</p>
+            {employeeCountDiff && payrollData.previous && (
+              <div className={`flex items-center mt-2 text-sm ${employeeCountDiff.diff >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                {employeeCountDiff.diff >= 0 ? <TrendingUp size={16} className="mr-1" /> : <TrendingDown size={16} className="mr-1" />}
+                <span>{employeeCountDiff.diff >= 0 ? '+' : ''}{employeeCountDiff.diff.toFixed(0)} employees ({employeeCountDiff.percentChange}%) vs last cycle</span>
+              </div>
+            )}
+          </div>
+          <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
+            <div className="flex items-center text-gray-500 mb-2">
+              <DollarSign size={16} className="mr-2" />
+              <span>Previous Cycle Cost</span>
             </div>
+            <p className="text-3xl font-bold text-gray-500">
+              {payrollData.previous ? `$${formatCurrency(payrollData.previous.totalCost)}` : 'N/A'}
+            </p>
+            <p className="text-sm text-gray-400 mt-2">{payrollData.previous ? payrollData.previous.cycle : 'No previous cycle data'}</p>
+          </div>
         </div>
 
         <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
-            <div className="p-6">
-                <h3 className="text-xl font-semibold text-gray-800">Employee Payments</h3>
-                <p className="text-gray-500 mt-1">Detailed breakdown of payments for the current cycle.</p>
-            </div>
-            <div className="overflow-x-auto">
-                <table className="w-full text-sm text-left text-gray-500">
-                    <thead className="bg-gray-50 text-xs text-gray-700 uppercase">
-                        <tr>
-                            <th scope="col" className="px-6 py-3">Employee</th>
-                            <th scope="col" className="px-6 py-3">Country</th>
-                            <th scope="col" className="px-6 py-3 text-right">Net Payment</th>
-                            <th scope="col" className="px-6 py-3 text-right">Previous Net</th>
-                            <th scope="col" className="px-6 py-3 text-right">Change</th>
-                            <th scope="col" className="px-6 py-3 text-center">Status</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {payrollData.current.employees.map(emp => {
-                            const prevEmp = payrollData.previous?.employees.find(p => p.name === emp.name);
-                            const prevNet = prevEmp?.net;
-                            const change = prevNet !== undefined ? emp.net - prevNet : emp.net;
+          <div className="p-6">
+            <h3 className="text-xl font-semibold text-gray-800">Employee Payments</h3>
+            <p className="text-gray-500 mt-1">Detailed breakdown of payments for the current cycle.</p>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm text-left text-gray-500">
+              <thead className="bg-gray-50 text-xs text-gray-700 uppercase">
+                <tr>
+                  <th scope="col" className="px-6 py-3">Employee</th>
+                  <th scope="col" className="px-6 py-3">Country</th>
+                  <th scope="col" className="px-6 py-3 text-right">Net Payment</th>
+                  <th scope="col" className="px-6 py-3 text-right">Previous Net</th>
+                  <th scope="col" className="px-6 py-3 text-right">Change</th>
+                  <th scope="col" className="px-6 py-3 text-center">Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                {payrollData.current.employees.map(emp => {
+                  const prevEmp = payrollData.previous?.employees.find(p => p.name === emp.name);
+                  const prevNet = prevEmp?.net;
+                  const change = prevNet !== undefined ? emp.net - prevNet : emp.net;
 
-                            return (
-                                <tr key={emp.id} className="bg-white border-b hover:bg-gray-50">
-                                    <th scope="row" className="px-6 py-4 font-medium text-gray-900 whitespace-nowrap">{emp.name}</th>
-                                    <td className="px-6 py-4">{emp.country}</td>
-                                    <td className="px-6 py-4 text-right font-semibold text-gray-800">${formatCurrency(emp.net)}</td>
-                                    <td className="px-6 py-4 text-right">{prevNet !== undefined ? `$${formatCurrency(prevNet)}` : '-'}</td>
-                                    <td className="px-6 py-4 text-right">
-                                        {prevNet !== undefined ? (
-                                            change !== 0 ? (
-                                                <span className={`font-semibold ${change > 0 ? 'text-green-600' : 'text-red-600'}`}>
-                                                    {change > 0 ? '+' : ''}${formatCurrency(change)}
-                                                </span>
-                                            ) : <span className="text-gray-500">$0.00</span>
-                                        ) : <span className="text-green-600">New</span>}
-                                    </td>
-                                    <td className="px-6 py-4 text-center">
-                                        <span className={`px-3 py-1 rounded-full text-xs font-semibold ${
-                                            emp.status === 'Paid' || emp.status === 'Completed' ? 'bg-green-100 text-green-800' : 'bg-yellow-100 text-yellow-800'
-                                        }`}>{emp.status}</span>
-                                    </td>
-                                </tr>
-                            );
-                        })}
-                    </tbody>
-                </table>
-            </div>
+                  return (
+                    <tr key={emp.id} className="bg-white border-b hover:bg-gray-50">
+                      <th scope="row" className="px-6 py-4 font-medium text-gray-900 whitespace-nowrap">{emp.name}</th>
+                      <td className="px-6 py-4">{emp.country}</td>
+                      <td className="px-6 py-4 text-right font-semibold text-gray-800">${formatCurrency(emp.net)}</td>
+                      <td className="px-6 py-4 text-right">{prevNet !== undefined ? `$${formatCurrency(prevNet)}` : '-'}</td>
+                      <td className="px-6 py-4 text-right">
+                        {prevNet !== undefined ? (
+                          change !== 0 ? (
+                            <span className={`font-semibold ${change > 0 ? 'text-green-600' : 'text-red-600'}`}>
+                              {change > 0 ? '+' : ''}${formatCurrency(change)}
+                            </span>
+                          ) : <span className="text-gray-500">$0.00</span>
+                        ) : <span className="text-green-600">New</span>}
+                      </td>
+                      <td className="px-6 py-4 text-center">
+                        <span className={`px-3 py-1 rounded-full text-xs font-semibold ${
+                          emp.status === 'Paid' || emp.status === 'Completed' ? 'bg-green-100 text-green-800' : 'bg-yellow-100 text-yellow-800'
+                        }`}>{emp.status}</span>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
         </div>
       </div>
     )
@@ -305,4 +307,3 @@ const DeelPayrollApp: React.FC = () => {
 };
 
 export default DeelPayrollApp;
-
