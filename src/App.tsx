@@ -12,7 +12,6 @@ interface DeelContract {
   worker?: { full_name: string; };
 }
 
-// Updated to include the 'payment' object for date filtering
 interface PaymentResponse {
   line_item: {
     amount: string;
@@ -22,7 +21,7 @@ interface PaymentResponse {
     name: string;
   };
   payment: {
-    paid_at: string; // This is crucial for client-side filtering
+    paid_at: string;
   };
 }
 
@@ -75,8 +74,8 @@ const DeelPayrollApp: React.FC = () => {
   const [error, setError] = useState<string>('');
   
   const [allContracts, setAllContracts] = useState<DeelContract[]>([]);
-  // This will now store ALL payments, not just from one period
-  const [allPayments, setAllPayments] = useState<PaymentResponse[]>([]);
+  const [period1Payments, setPeriod1Payments] = useState<PaymentResponse[]>([]);
+  const [period2Payments, setPeriod2Payments] = useState<PaymentResponse[]>([]);
   const [activeTab, setActiveTab] = useState<ViewType>('EOR');
   
   const [year1, setYear1] = useState(currentYear);
@@ -84,14 +83,15 @@ const DeelPayrollApp: React.FC = () => {
   const [year2, setYear2] = useState(new Date(new Date().setMonth(new Date().getMonth() - 1)).getFullYear());
   const [month2, setMonth2] = useState(new Date(new Date().setMonth(new Date().getMonth() - 1)).getMonth());
 
-  const fetchAllPaginatedData = async (): Promise<PaymentResponse[]> => {
+  const fetchAllPaginatedData = async (params: Record<string, string>): Promise<PaymentResponse[]> => {
     let allData: PaymentResponse[] = [];
     let offset = 0;
     const limit = 50;
     let hasMore = true;
 
     while(hasMore) {
-        const url = `/reports/detailed-payments?limit=${limit}&offset=${offset}`;
+        const queryParams = new URLSearchParams(params);
+        const url = `/reports/detailed-payments?limit=${limit}&offset=${offset}&${queryParams.toString()}`;
         const pageData = await callDeelApi<PaymentResponse[]>(url, apiKey);
         
         if (pageData && pageData.length > 0) {
@@ -119,10 +119,33 @@ const DeelPayrollApp: React.FC = () => {
         console.log("--- Fetched Contracts ---", contracts);
         setAllContracts(contracts);
 
-        // Fetch ALL payments without date filters
-        const payments = await fetchAllPaginatedData();
-        console.log("--- Fetched ALL Payments ---", payments);
-        setAllPayments(payments);
+        const period1Start = new Date(year1, month1, 1).toISOString();
+        const period1End = new Date(year1, month1 + 1, 0, 23, 59, 59, 999).toISOString();
+        const period2Start = new Date(year2, month2, 1).toISOString();
+        const period2End = new Date(year2, month2 + 1, 0, 23, 59, 59, 999).toISOString();
+
+        // --- CORRECTED API CALL LOGIC ---
+        // For the primary period, check if it's the current month. If so, don't send `to_date`.
+        const isCurrentMonth = year1 === currentYear && month1 === new Date().getMonth();
+        
+        const period1Params = { from_date: period1Start };
+        if (!isCurrentMonth) {
+            // @ts-ignore
+            period1Params.to_date = period1End;
+        }
+        
+        const period2Params = { from_date: period2Start, to_date: period2End };
+
+        const [p1Payments, p2Payments] = await Promise.all([
+            fetchAllPaginatedData(period1Params),
+            fetchAllPaginatedData(period2Params)
+        ]);
+        
+        console.log(`--- Payments for ${months[month1].name} ${year1} ---`, p1Payments);
+        console.log(`--- Payments for ${months[month2].name} ${year2} ---`, p2Payments);
+        
+        setPeriod1Payments(p1Payments);
+        setPeriod2Payments(p2Payments);
 
         setIsAuthenticated(true);
     } catch (err: any) {
@@ -148,15 +171,8 @@ const DeelPayrollApp: React.FC = () => {
     const processDashboardData = (contracts: DeelContract[]): DashboardData => {
       const contractIds = new Set(contracts.map(c => c.id));
 
-      const processPayments = (year: number, month: number) => {
-          // Client-side filtering of payments based on selected month and year
-          const filteredPayments = allPayments.filter(p => {
-              const paymentDate = new Date(p.payment.paid_at);
-              return contractIds.has(p.contract.id) &&
-                     paymentDate.getFullYear() === year &&
-                     paymentDate.getMonth() === month;
-          });
-          
+      const processPayments = (payments: PaymentResponse[], year: number, month: number) => {
+          const filteredPayments = payments.filter(p => contractIds.has(p.contract.id));
           const totalCost = filteredPayments.reduce((acc, p) => acc + parseFloat(p.line_item.amount.replace(/,/g, '')), 0);
           
           const paymentsByContract = filteredPayments.reduce((acc, p) => {
@@ -186,8 +202,8 @@ const DeelPayrollApp: React.FC = () => {
           };
       };
 
-      const period1 = processPayments(year1, month1);
-      const period2 = processPayments(year2, month2);
+      const period1 = processPayments(period1Payments, year1, month1);
+      const period2 = processPayments(period2Payments, year2, month2);
 
       return {
           period1,
@@ -202,8 +218,7 @@ const DeelPayrollApp: React.FC = () => {
         peoData: processDashboardData(allContracts.filter(c => c.contract_type === 'peo')),
         contractorData: processDashboardData(allContracts.filter(c => ['ongoing_time_based', 'pay_as_you_go_time_based', 'milestones', 'fixed_rate'].includes(c.contract_type)))
     };
-  }, [allContracts, allPayments, year1, month1, year2, month2]);
-
+  }, [allContracts, period1Payments, period2Payments, year1, month1, year2, month2]);
 
   const renderAuthScreen = () => (
     <div className="w-full max-w-md mx-auto bg-white p-8 rounded-2xl shadow-lg border border-gray-100">
