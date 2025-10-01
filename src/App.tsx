@@ -67,12 +67,18 @@ const DeelPayrollApp: React.FC = () => {
     let hasMore = true;
 
     while(hasMore) {
-        const url = `${baseUrl}?limit=${limit}&offset=${offset}&${new URLSearchParams(params).toString()}`;
-        const pageData = await callDeelApi<{data: Payment[]}>(url, apiKey);
+        const queryParams = new URLSearchParams(params);
+        const url = `${baseUrl}?limit=${limit}&offset=${offset}&${queryParams.toString()}`;
         
-        if (pageData && pageData.data.length > 0) {
-            allData = [...allData, ...pageData.data];
-            offset += limit;
+        // The API response for this endpoint is NOT nested in a data property, so we adjust the expected type
+        const pageData = await callDeelApi<Payment[]>(url, apiKey);
+        
+        if (pageData && pageData.length > 0) {
+            allData = [...allData, ...pageData];
+            offset += pageData.length;
+            if (pageData.length < limit) {
+                hasMore = false;
+            }
         } else {
             hasMore = false;
         }
@@ -89,20 +95,18 @@ const DeelPayrollApp: React.FC = () => {
     setError('');
 
     try {
-        // Step 1: Fetch all contracts to get worker types
         const contracts = await callDeelApi<DeelContract[]>('/contracts', apiKey);
         setAllContracts(contracts || []);
 
-        // Step 2: Define date ranges
         const today = new Date();
-        const currentMonthStart = new Date(today.getFullYear(), today.getMonth(), 1).toISOString();
-        const lastMonthStart = new Date(today.getFullYear(), today.getMonth() - 1, 1).toISOString();
-        const lastMonthEnd = new Date(today.getFullYear(), today.getMonth(), 0).toISOString();
+        const currentMonthStart = new Date(today.getFullYear(), today.getMonth(), 1).toISOString().split('T')[0];
+        const lastMonthStart = new Date(today.getFullYear(), today.getMonth() - 1, 1).toISOString().split('T')[0];
+        const lastMonthEnd = new Date(today.getFullYear(), today.getMonth(), 0).toISOString().split('T')[0];
 
-        // Step 3: Fetch payment reports for both months
+        // Corrected the endpoint path here
         const [currentPayments, previousPayments] = await Promise.all([
-            fetchAllPaginatedData('/reports/payments_detailed', { date_from: currentMonthStart }),
-            fetchAllPaginatedData('/reports/payments_detailed', { date_from: lastMonthStart, date_to: lastMonthEnd })
+            fetchAllPaginatedData('/reports/detailed-payments', { date_from: currentMonthStart }),
+            fetchAllPaginatedData('/reports/detailed-payments', { date_from: lastMonthStart, date_to: lastMonthEnd })
         ]);
         
         setCurrentMonthPayments(currentPayments);
