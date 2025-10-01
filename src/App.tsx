@@ -47,7 +47,7 @@ interface DifferenceCalculation {
 
 // --- API Helper ---
 const callDeelApi = async <T,>(endpoint: string, apiKey: string): Promise<T> => {
-  const API_BASE_URL = 'https://api.letsdeel.com/rest/v2';
+  const API_BASE_URL = 'https://api-sandbox.demo.deel.com/rest/v2';
   const url = `${API_BASE_URL}${endpoint}`;
   
   console.log('Calling Deel API:', url);
