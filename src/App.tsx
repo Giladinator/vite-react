@@ -1,5 +1,5 @@
 import React, { useState, useMemo } from 'react';
-import { AlertCircle, Download, DollarSign, Loader2, RefreshCw, Users, TrendingUp, TrendingDown } from 'lucide-react';
+import { AlertCircle, DollarSign, Loader2, RefreshCw, Users } from 'lucide-react';
 import { callDeelApi } from './services/deelApiService';
 
 // --- Type Definitions for API Responses ---
@@ -64,11 +64,6 @@ interface ContractorData {
     totalCost: number;
     count: number;
     employees: Employee[];
-}
-
-interface DifferenceCalculation {
-  diff: number;
-  percentChange: string;
 }
 
 const DeelPayrollApp: React.FC = () => {
@@ -247,91 +242,4 @@ const DeelPayrollApp: React.FC = () => {
     <>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
             <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
-                <div className="flex items-center text-gray-500 mb-2"><DollarSign size={16} className="mr-2" /><span>Total Contractor Cost</span></div>
-                <p className="text-3xl font-bold text-gray-800">${formatCurrency(contractorData.totalCost)}</p>
-            </div>
-            <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
-                <div className="flex items-center text-gray-500 mb-2"><Users size={16} className="mr-2" /><span>Total Contractors</span></div>
-                <p className="text-3xl font-bold text-gray-800">{contractorData.count}</p>
-            </div>
-        </div>
-        <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
-            <div className="p-6">
-                <h3 className="text-xl font-semibold text-gray-800">Contractor Payments</h3>
-                <p className="text-gray-500 mt-1">List of active contractors and their compensation.</p>
-            </div>
-            <div className="overflow-x-auto">
-                <table className="w-full text-sm text-left text-gray-500">
-                    <thead className="bg-gray-50 text-xs text-gray-700 uppercase">
-                        <tr>
-                            <th scope="col" className="px-6 py-3">Contractor</th>
-                            <th scope="col" className="px-6 py-3">Role</th>
-                            <th scope="col" className="px-6 py-3 text-right">Payment</th>
-                            <th scope="col" className="px-6 py-3 text-center">Status</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {contractorData.employees.map(emp => (
-                            <tr key={emp.id} className="bg-white border-b hover:bg-gray-50">
-                                <th scope="row" className="px-6 py-4 font-medium text-gray-900 whitespace-nowrap">{emp.name}</th>
-                                <td className="px-6 py-4">{emp.roleOrCountry}</td>
-                                <td className="px-6 py-4 text-right font-semibold text-gray-800">${formatCurrency(emp.net)}</td>
-                                <td className="px-6 py-4 text-center">
-                                    <span className={`px-3 py-1 rounded-full text-xs font-semibold ${emp.currencyOrStatus === 'in_progress' || emp.currencyOrStatus === 'active' ? 'bg-green-100 text-green-800' : 'bg-yellow-100 text-yellow-800'}`}>{emp.currencyOrStatus}</span>
-                                </td>
-                            </tr>
-                        ))}
-                    </tbody>
-                </table>
-            </div>
-        </div>
-    </>
-  );
-
-  const renderDashboard = () => (
-    <div className="w-full">
-      <header className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-8">
-        <div>
-          <h1 className="text-3xl font-bold text-gray-800">Global Payroll Dashboard</h1>
-          <p className="text-gray-500 mt-1">Viewing data for: {activeTab}</p>
-        </div>
-        <div className="flex items-center space-x-2 mt-4 sm:mt-0">
-          <button onClick={handleFetchData} disabled={loading} className="p-2 rounded-lg border bg-white hover:bg-gray-50 transition flex items-center justify-center disabled:opacity-50">
-            {loading ? <Loader2 className="animate-spin" size={20} /> : <RefreshCw size={20} />}
-          </button>
-        </div>
-      </header>
-
-      <div className="mb-8">
-        <div className="border-b border-gray-200">
-          <nav className="-mb-px flex space-x-8" aria-label="Tabs">
-            {(['EOR', 'PEO', 'Contractors'] as ViewType[]).map(tab => (
-              <button
-                key={tab}
-                onClick={() => setActiveTab(tab)}
-                className={`${activeTab === tab ? 'border-blue-500 text-blue-600' : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'} whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm`}
-              >
-                {tab}
-              </button>
-            ))}
-          </nav>
-        </div>
-      </div>
-      
-      {activeTab === 'EOR' && renderPayrollView(eorData, 'EOR')}
-      {activeTab === 'PEO' && renderPayrollView(peoData, 'PEO')}
-      {activeTab === 'Contractors' && renderContractorView()}
-
-    </div>
-  );
-
-  return (
-    <div className="bg-gray-50 min-h-screen font-sans">
-      <div className="container mx-auto p-4 sm:p-6 lg:p-8">
-        {!isAuthenticated ? renderAuthScreen() : renderDashboard()}
-      </div>
-    </div>
-  );
-};
-
-export default DeelPayrollApp;
+                <div className="flex items-center text-gray-500 mb
