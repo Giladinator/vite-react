@@ -124,7 +124,6 @@ const DeelPayrollApp: React.FC = () => {
         const period2Start = new Date(year2, month2, 1).toISOString();
         const period2End = new Date(year2, month2 + 1, 0, 23, 59, 59, 999).toISOString();
 
-        // --- CORRECTED: Always send both from_date and to_date ---
         const [p1Payments, p2Payments] = await Promise.all([
             fetchAllPaginatedData({ from_date: period1Start, to_date: period1End }),
             fetchAllPaginatedData({ from_date: period2Start, to_date: period2End })
@@ -156,6 +155,7 @@ const DeelPayrollApp: React.FC = () => {
     return { diff, percentChange };
   };
 
+  // --- REWRITTEN DATA PROCESSING LOGIC ---
   const { eorData, peoData, contractorData } = useMemo(() => {
     const processDashboardData = (contracts: DeelContract[]): DashboardData => {
       const contractIds = new Set(contracts.map(c => c.id));
