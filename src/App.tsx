@@ -3,12 +3,13 @@ import { AlertCircle, DollarSign, Loader2, RefreshCw, Users, TrendingUp, Trendin
 import { callDeelApi } from './services/deelApiService';
 
 // --- Type Definitions for API Responses ---
+// CORRECTED: Interface now matches the sample API response
 interface DeelContract {
   id: string;
-  name: string;
-  job_title_name: string;
+  title: string; // Was 'name'
+  type: 'eor' | 'peo' | 'ongoing_time_based' | 'pay_as_you_go_time_based' | 'milestones' | 'fixed_rate'; // Was 'contract_type'
   status: string;
-  contract_type: 'eor' | 'peo' | 'ongoing_time_based' | 'pay_as_you_go_time_based' | 'milestones' | 'fixed_rate';
+  job_title_name?: string; // Make optional as it's not in the sample
   worker?: { full_name: string; };
 }
 
@@ -155,7 +156,6 @@ const DeelPayrollApp: React.FC = () => {
     return { diff, percentChange };
   };
 
-  // --- REWRITTEN DATA PROCESSING LOGIC ---
   const { eorData, peoData, contractorData } = useMemo(() => {
     const processDashboardData = (contracts: DeelContract[]): DashboardData => {
       const contractIds = new Set(contracts.map(c => c.id));
@@ -176,7 +176,7 @@ const DeelPayrollApp: React.FC = () => {
               const contract = contracts.find(c => c.id === contractId);
               return {
                   contractId: contractId,
-                  name: contract?.worker?.full_name || contract?.name || 'N/A',
+                  name: contract?.worker?.full_name || contract?.title || 'N/A',
                   role: contract?.job_title_name || 'N/A',
                   status: contract?.status || 'active',
                   amount: paymentsByContract[contractId]
@@ -203,9 +203,9 @@ const DeelPayrollApp: React.FC = () => {
     };
 
     return {
-        eorData: processDashboardData(allContracts.filter(c => c.contract_type === 'eor')),
-        peoData: processDashboardData(allContracts.filter(c => c.contract_type === 'peo')),
-        contractorData: processDashboardData(allContracts.filter(c => ['ongoing_time_based', 'pay_as_you_go_time_based', 'milestones', 'fixed_rate'].includes(c.contract_type)))
+        eorData: processDashboardData(allContracts.filter(c => c.type === 'eor')),
+        peoData: processDashboardData(allContracts.filter(c => c.type === 'peo')),
+        contractorData: processDashboardData(allContracts.filter(c => ['ongoing_time_based', 'pay_as_you_go_time_based', 'milestones', 'fixed_rate'].includes(c.type)))
     };
   }, [allContracts, period1Payments, period2Payments, year1, month1, year2, month2]);
 
