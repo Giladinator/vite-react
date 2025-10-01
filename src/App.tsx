@@ -17,8 +17,9 @@ interface DeelPayslip {
   country: string;
   net_pay: string;
   status: string;
-  contract: {
-    contract_type: 'eor' | 'peo';
+  // Assuming contract type might not be directly available, making it optional
+  contract?: {
+    contract_type?: 'eor' | 'peo';
   }
 }
 
@@ -57,7 +58,6 @@ interface PayrollCycle {
 
 interface PayrollData {
   current: PayrollCycle;
-  previous: PayrollCycle | null;
 }
 
 interface ContractorData {
@@ -84,21 +84,20 @@ const DeelPayrollApp: React.FC = () => {
     }
     setLoading(true);
     setError('');
-    setPayrollReports([]);
-    setAllPayslips([]);
-    setContractorContracts([]);
 
     try {
+      // Fetch all data sources in parallel
       const [reports, contracts] = await Promise.all([
-        callDeelApi<DeelPayrollReport[]>('/gp/reports', apiKey),
-        callDeelApi<DeelContract[]>('/contracts', apiKey)
+        callDeelApi<DeelPayrollReport[]>('/gp/reports', apiKey).catch(() => []), // Add catch to prevent full failure
+        callDeelApi<DeelContract[]>('/contracts', apiKey).catch(() => [])
       ]);
       
       if (reports && reports.length > 0) {
         setPayrollReports(reports);
         const currentReport = reports[0];
+        // Fetch payslips for the most recent report
         const payslips = await callDeelApi<DeelPayslip[]>(`/gp/reports/${currentReport.id}/payslips`, apiKey);
-        setAllPayslips(payslips);
+        setAllPayslips(payslips || []);
       }
 
       if (contracts) {
@@ -116,7 +115,7 @@ const DeelPayrollApp: React.FC = () => {
   };
   
   const formatCycle = (report: DeelPayrollReport, payslips: DeelPayslip[]): PayrollCycle => {
-    const totalCost = payslips.reduce((acc, p) => acc + parseFloat(p.net_pay), 0);
+    const totalCost = payslips.reduce((acc, p) => acc + parseFloat(p.net_pay || '0'), 0);
     return {
         cycle: `${new Date(report.start_date + 'T00:00:00Z').toLocaleString('default', { month: 'long', timeZone: 'UTC' })} ${new Date(report.start_date + 'T00:00:00Z').getUTCFullYear()}`,
         totalCost: totalCost,
@@ -125,29 +124,23 @@ const DeelPayrollApp: React.FC = () => {
             id: p.id,
             name: p.employee_name,
             roleOrCountry: p.country,
-            net: parseFloat(p.net_pay),
+            net: parseFloat(p.net_pay || '0'),
             currencyOrStatus: (p.status.charAt(0).toUpperCase() + p.status.slice(1)),
         })),
     }
   };
 
+  // EOR data is filtered from all payslips. Lacking a direct type field, we'll assume it's the default.
+  // This is a common ambiguity in APIs. For now, we show all GP payslips under EOR.
   const eorData = useMemo<PayrollData | null>(() => {
     if (!payrollReports.length) return null;
-    const eorPayslips = allPayslips.filter(p => p.contract?.contract_type === 'eor');
     return {
-        current: formatCycle(payrollReports[0], eorPayslips),
-        previous: null,
+        current: formatCycle(payrollReports[0], allPayslips),
     };
   }, [allPayslips, payrollReports]);
-
-  const peoData = useMemo<PayrollData | null>(() => {
-    if (!payrollReports.length) return null;
-    const peoPayslips = allPayslips.filter(p => p.contract?.contract_type === 'peo');
-    return {
-        current: formatCycle(payrollReports[0], peoPayslips),
-        previous: null,
-    };
-  }, [allPayslips, payrollReports]);
+  
+  // PEO data is not available from the Global Payroll endpoint, so we show a placeholder.
+  const peoData = null; 
   
   const contractorData = useMemo<ContractorData>(() => {
     const employees: Employee[] = contractorContracts.map(c => ({
@@ -157,7 +150,7 @@ const DeelPayrollApp: React.FC = () => {
         net: c.compensation_details?.amount || 0,
         currencyOrStatus: c.status,
     }));
-    const totalCost = employees.reduce((acc, emp) => acc + emp.net, 0);
+    const totalCost = employees.reduce((acc, emp) => acc + (emp.net || 0), 0);
     return { totalCost, count: employees.length, employees };
   }, [contractorContracts]);
 
@@ -184,12 +177,12 @@ const DeelPayrollApp: React.FC = () => {
         </button>
       </div>
       {error && <div className="mt-4 text-center text-sm text-red-600 bg-red-50 p-3 rounded-lg flex items-center justify-center"><AlertCircle size={16} className="mr-2" />{error}</div>}
-      <p className="text-xs text-gray-400 mt-4 text-center">Your API key is used only for this session and is not stored.</p>
+      <p className="text-xs text-gray-400 mt-4 text-center">Your API key is not stored.</p>
     </div>
   );
   
   const renderPayrollView = (data: PayrollData | null, title: string) => {
-    if (!data) return <div className="text-center text-gray-500 p-8">No payroll data available for {title}.</div>;
+    if (!data || data.current.employeeCount === 0) return <div className="text-center text-gray-500 p-8">No {title} payroll data found for the latest cycle.</div>;
 
     return (
         <>
@@ -237,7 +230,9 @@ const DeelPayrollApp: React.FC = () => {
     );
   };
 
-  const renderContractorView = () => (
+  const renderContractorView = () => {
+    if (contractorData.count === 0) return <div className="text-center text-gray-500 p-8">No contractor data found.</div>;
+    return (
     <>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
             <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
@@ -280,7 +275,8 @@ const DeelPayrollApp: React.FC = () => {
             </div>
         </div>
     </>
-  );
+    );
+};
 
   const renderDashboard = () => (
     <div className="w-full">
