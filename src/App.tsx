@@ -48,7 +48,11 @@ interface DifferenceCalculation {
 // --- API Helper ---
 const callDeelApi = async <T,>(endpoint: string, apiKey: string): Promise<T> => {
   const API_BASE_URL = 'https://api.letsdeel.com/rest/v2';
-  const response = await fetch(`${API_BASE_URL}${endpoint}`, {
+  const url = `${API_BASE_URL}${endpoint}`;
+  
+  console.log('Calling Deel API:', url);
+  
+  const response = await fetch(url, {
     headers: {
       'Authorization': `Bearer ${apiKey}`,
       'Content-Type': 'application/json',
@@ -56,8 +60,14 @@ const callDeelApi = async <T,>(endpoint: string, apiKey: string): Promise<T> => 
   });
 
   if (!response.ok) {
-    const errorData = await response.json();
-    throw new Error(errorData.errors?.[0]?.message || `API error: ${response.statusText}`);
+    let errorMessage = `API error: ${response.status} ${response.statusText}`;
+    try {
+      const errorData = await response.json();
+      errorMessage = errorData.errors?.[0]?.message || errorData.message || errorMessage;
+    } catch (e) {
+      // If error response is not JSON, use the status text
+    }
+    throw new Error(errorMessage);
   }
   return response.json();
 };
@@ -79,6 +89,10 @@ const DeelPayrollApp: React.FC = () => {
     setPayrollData(null);
 
     try {
+      // Try to fetch contracts first to verify API key works
+      const testResponse = await callDeelApi<any>('/contracts', apiKey);
+      console.log('Test API response:', testResponse);
+      
       const reports = await callDeelApi<DeelPayrollReport[]>('/gp/reports', apiKey);
       if (!reports || reports.length === 0) {
         setError('No payroll reports found for this API key.');
