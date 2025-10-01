@@ -63,14 +63,13 @@ const DeelPayrollApp: React.FC = () => {
   const fetchAllPaginatedData = async (baseUrl: string, params: Record<string, string>): Promise<Payment[]> => {
     let allData: Payment[] = [];
     let offset = 0;
-    const limit = 50; // Max limit per Deel API docs
+    const limit = 50;
     let hasMore = true;
 
     while(hasMore) {
         const queryParams = new URLSearchParams(params);
         const url = `${baseUrl}?limit=${limit}&offset=${offset}&${queryParams.toString()}`;
         
-        // The API response for this endpoint is NOT nested in a data property, so we adjust the expected type
         const pageData = await callDeelApi<Payment[]>(url, apiKey);
         
         if (pageData && pageData.length > 0) {
@@ -98,15 +97,16 @@ const DeelPayrollApp: React.FC = () => {
         const contracts = await callDeelApi<DeelContract[]>('/contracts', apiKey);
         setAllContracts(contracts || []);
 
+        // Corrected date formatting to full ISO 8601 timestamp
         const today = new Date();
-        const currentMonthStart = new Date(today.getFullYear(), today.getMonth(), 1).toISOString().split('T')[0];
-        const lastMonthStart = new Date(today.getFullYear(), today.getMonth() - 1, 1).toISOString().split('T')[0];
-        const lastMonthEnd = new Date(today.getFullYear(), today.getMonth(), 0).toISOString().split('T')[0];
+        const currentMonthStart = new Date(today.getFullYear(), today.getMonth(), 1).toISOString();
+        const lastMonthStart = new Date(today.getFullYear(), today.getMonth() - 1, 1).toISOString();
+        const lastMonthEnd = new Date(today.getFullYear(), today.getMonth(), 0, 23, 59, 59, 999).toISOString();
 
-        // Corrected the endpoint path here
+        // Corrected parameter names to from_date and to_date
         const [currentPayments, previousPayments] = await Promise.all([
-            fetchAllPaginatedData('/reports/detailed-payments', { date_from: currentMonthStart }),
-            fetchAllPaginatedData('/reports/detailed-payments', { date_from: lastMonthStart, date_to: lastMonthEnd })
+            fetchAllPaginatedData('/reports/detailed-payments', { from_date: currentMonthStart }),
+            fetchAllPaginatedData('/reports/detailed-payments', { from_date: lastMonthStart, to_date: lastMonthEnd })
         ]);
         
         setCurrentMonthPayments(currentPayments);
@@ -138,20 +138,24 @@ const DeelPayrollApp: React.FC = () => {
     const processPayments = (payments: Payment[]) => {
         const filteredPayments = payments.filter(p => contractIds.has(p.contract_id));
         const totalCost = filteredPayments.reduce((acc, p) => acc + parseFloat(p.amount), 0);
-        const uniqueContracts = new Set(filteredPayments.map(p => p.contract_id));
+        
+        const paymentsByContract = filteredPayments.reduce((acc, p) => {
+            acc[p.contract_id] = (acc[p.contract_id] || 0) + parseFloat(p.amount);
+            return acc;
+        }, {} as Record<string, number>);
 
-        const employeePayments: EmployeePayment[] = filteredPayments.map(p => {
-            const contract = contracts.find(c => c.id === p.contract_id);
+        const employeePayments: EmployeePayment[] = Object.keys(paymentsByContract).map(contractId => {
+            const contract = contracts.find(c => c.id === contractId);
             return {
-                contractId: p.contract_id,
+                contractId: contractId,
                 name: contract?.worker?.full_name || contract?.name || 'N/A',
                 role: contract?.job_title_name || 'N/A',
                 status: contract?.status || 'active',
-                amount: parseFloat(p.amount)
+                amount: paymentsByContract[contractId]
             }
-        })
+        });
         
-        return { totalCost, count: uniqueContracts.size, payments: employeePayments };
+        return { totalCost, count: employeePayments.length, payments: employeePayments };
     };
 
     const current = processPayments(currentMonthPayments);
