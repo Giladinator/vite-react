@@ -1,5 +1,5 @@
 import React, { useState, useMemo } from 'react';
-import { AlertCircle, DollarSign, Loader2, RefreshCw, Users } from 'lucide-react';
+import { AlertCircle, DollarSign, Loader2, RefreshCw, Users, TrendingUp, TrendingDown } from 'lucide-react';
 import { callDeelApi } from './services/deelApiService';
 
 // --- Type Definitions for API Responses ---
@@ -9,30 +9,44 @@ interface DeelContract {
   job_title_name: string;
   status: string;
   contract_type: 'eor' | 'peo' | 'ongoing_time_based' | 'pay_as_you_go_time_based' | 'milestones' | 'fixed_rate';
-  compensation_details?: { // Make optional to handle cases where it might be missing
-    amount: number;
-    currency: string;
-  };
-  worker?: {
-    full_name: string;
-  }
+  worker?: { full_name: string; };
+}
+
+interface Payment {
+  id: string;
+  contract_id: string;
+  amount: string;
+  // Add other relevant payment fields if needed
 }
 
 // --- Type Definitions for Application State ---
 type ViewType = 'EOR' | 'PEO' | 'Contractors';
 
-interface Employee {
-  id: string;
+interface EmployeePayment {
+  contractId: string;
   name: string;
   role: string;
   status: string;
-  compensation: string;
+  amount: number;
 }
 
 interface DashboardData {
-    totalCost: number;
-    count: number;
-    employees: Employee[];
+    current: {
+        totalCost: number;
+        count: number;
+        payments: EmployeePayment[];
+    };
+    previous: {
+        totalCost: number;
+        count: number;
+    };
+    costDiff: DifferenceCalculation | null;
+    countDiff: DifferenceCalculation | null;
+}
+
+interface DifferenceCalculation {
+  diff: number;
+  percentChange: string;
 }
 
 const DeelPayrollApp: React.FC = () => {
@@ -42,7 +56,29 @@ const DeelPayrollApp: React.FC = () => {
   const [error, setError] = useState<string>('');
   
   const [allContracts, setAllContracts] = useState<DeelContract[]>([]);
+  const [currentMonthPayments, setCurrentMonthPayments] = useState<Payment[]>([]);
+  const [previousMonthPayments, setPreviousMonthPayments] = useState<Payment[]>([]);
   const [activeTab, setActiveTab] = useState<ViewType>('EOR');
+
+  const fetchAllPaginatedData = async (baseUrl: string, params: Record<string, string>): Promise<Payment[]> => {
+    let allData: Payment[] = [];
+    let offset = 0;
+    const limit = 50; // Max limit per Deel API docs
+    let hasMore = true;
+
+    while(hasMore) {
+        const url = `${baseUrl}?limit=${limit}&offset=${offset}&${new URLSearchParams(params).toString()}`;
+        const pageData = await callDeelApi<{data: Payment[]}>(url, apiKey);
+        
+        if (pageData && pageData.data.length > 0) {
+            allData = [...allData, ...pageData.data];
+            offset += limit;
+        } else {
+            hasMore = false;
+        }
+    }
+    return allData;
+  };
 
   const handleFetchData = async () => {
     if (!apiKey) {
@@ -51,42 +87,83 @@ const DeelPayrollApp: React.FC = () => {
     }
     setLoading(true);
     setError('');
-    setAllContracts([]);
 
     try {
-      const contracts = await callDeelApi<DeelContract[]>('/contracts', apiKey);
-      setAllContracts(contracts || []);
-      setIsAuthenticated(true);
+        // Step 1: Fetch all contracts to get worker types
+        const contracts = await callDeelApi<DeelContract[]>('/contracts', apiKey);
+        setAllContracts(contracts || []);
+
+        // Step 2: Define date ranges
+        const today = new Date();
+        const currentMonthStart = new Date(today.getFullYear(), today.getMonth(), 1).toISOString();
+        const lastMonthStart = new Date(today.getFullYear(), today.getMonth() - 1, 1).toISOString();
+        const lastMonthEnd = new Date(today.getFullYear(), today.getMonth(), 0).toISOString();
+
+        // Step 3: Fetch payment reports for both months
+        const [currentPayments, previousPayments] = await Promise.all([
+            fetchAllPaginatedData('/reports/payments_detailed', { date_from: currentMonthStart }),
+            fetchAllPaginatedData('/reports/payments_detailed', { date_from: lastMonthStart, date_to: lastMonthEnd })
+        ]);
+        
+        setCurrentMonthPayments(currentPayments);
+        setPreviousMonthPayments(previousPayments);
+
+        setIsAuthenticated(true);
     } catch (err: any) {
-      setError(err.message || 'An unknown error occurred while fetching contracts.');
+      setError(err.message || 'An error occurred while fetching data.');
       setIsAuthenticated(false);
     } finally {
       setLoading(false);
     }
   };
   
-  const formatCurrency = (value: number, currency: string) => 
-    value.toLocaleString(undefined, { style: 'currency', currency, minimumFractionDigits: 2, maximumFractionDigits: 2 });
-
-  const processContracts = (contracts: DeelContract[]): DashboardData => {
-    const employees: Employee[] = contracts.map(c => ({
-        id: c.id,
-        name: c.worker?.full_name || c.name,
-        role: c.job_title_name || 'N/A',
-        status: c.status,
-        compensation: c.compensation_details 
-            ? formatCurrency(c.compensation_details.amount, c.compensation_details.currency)
-            : 'N/A',
-    }));
-
-    const totalCost = contracts.reduce((acc, c) => acc + (c.compensation_details?.amount || 0), 0);
-    
-    return { totalCost, count: employees.length, employees };
+  const formatCurrency = (value: number) => 
+    value.toLocaleString(undefined, { style: 'currency', currency: 'USD', minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  
+  const calculateDifference = (current: number, previous: number | undefined): DifferenceCalculation | null => {
+    if (previous === undefined || current === previous) return null;
+    if (previous === 0) return { diff: current, percentChange: '100.00' };
+    const diff = current - previous;
+    const percentChange = ((diff / previous) * 100).toFixed(2);
+    return { diff, percentChange };
   };
 
-  const eorData = useMemo(() => processContracts(allContracts.filter(c => c.contract_type === 'eor')), [allContracts]);
-  const peoData = useMemo(() => processContracts(allContracts.filter(c => c.contract_type === 'peo')), [allContracts]);
-  const contractorData = useMemo(() => processContracts(allContracts.filter(c => ['ongoing_time_based', 'pay_as_you_go_time_based', 'milestones', 'fixed_rate'].includes(c.contract_type))), [allContracts]);
+  const processDashboardData = (contracts: DeelContract[]): DashboardData => {
+    const contractIds = new Set(contracts.map(c => c.id));
+
+    const processPayments = (payments: Payment[]) => {
+        const filteredPayments = payments.filter(p => contractIds.has(p.contract_id));
+        const totalCost = filteredPayments.reduce((acc, p) => acc + parseFloat(p.amount), 0);
+        const uniqueContracts = new Set(filteredPayments.map(p => p.contract_id));
+
+        const employeePayments: EmployeePayment[] = filteredPayments.map(p => {
+            const contract = contracts.find(c => c.id === p.contract_id);
+            return {
+                contractId: p.contract_id,
+                name: contract?.worker?.full_name || contract?.name || 'N/A',
+                role: contract?.job_title_name || 'N/A',
+                status: contract?.status || 'active',
+                amount: parseFloat(p.amount)
+            }
+        })
+        
+        return { totalCost, count: uniqueContracts.size, payments: employeePayments };
+    };
+
+    const current = processPayments(currentMonthPayments);
+    const previous = processPayments(previousMonthPayments);
+
+    return {
+        current,
+        previous: { totalCost: previous.totalCost, count: previous.count },
+        costDiff: calculateDifference(current.totalCost, previous.totalCost),
+        countDiff: calculateDifference(current.count, previous.count),
+    };
+  };
+
+  const eorData = useMemo(() => processDashboardData(allContracts.filter(c => c.contract_type === 'eor')), [allContracts, currentMonthPayments, previousMonthPayments]);
+  const peoData = useMemo(() => processDashboardData(allContracts.filter(c => c.contract_type === 'peo')), [allContracts, currentMonthPayments, previousMonthPayments]);
+  const contractorData = useMemo(() => processDashboardData(allContracts.filter(c => ['ongoing_time_based', 'pay_as_you_go_time_based', 'milestones', 'fixed_rate'].includes(c.contract_type))), [allContracts, currentMonthPayments, previousMonthPayments]);
 
   const renderAuthScreen = () => (
     <div className="w-full max-w-md mx-auto bg-white p-8 rounded-2xl shadow-lg border border-gray-100">
@@ -114,25 +191,36 @@ const DeelPayrollApp: React.FC = () => {
   );
   
   const renderDataView = (data: DashboardData, title: ViewType) => {
-    if (data.count === 0) return <div className="text-center text-gray-500 p-8">No {title} data found.</div>;
+    if (data.current.count === 0 && !loading) return <div className="text-center text-gray-500 p-8">No current payment data found for {title}.</div>;
 
     return (
         <>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
                 <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
                     <div className="flex items-center text-gray-500 mb-2"><DollarSign size={16} className="mr-2" /><span>Total Cost ({title})</span></div>
-                    {/* Note: Total cost for different currencies is summed up without conversion */}
-                    <p className="text-3xl font-bold text-gray-800">${data.totalCost.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</p>
+                    <p className="text-3xl font-bold text-gray-800">{formatCurrency(data.current.totalCost)}</p>
+                    {data.costDiff && (
+                         <div className={`flex items-center mt-2 text-sm ${data.costDiff.diff >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                            {data.costDiff.diff >= 0 ? <TrendingUp size={16} className="mr-1" /> : <TrendingDown size={16} className="mr-1" />}
+                            <span>{data.costDiff.diff >= 0 ? '+' : ''}{formatCurrency(data.costDiff.diff)} ({data.costDiff.percentChange}%) vs last month</span>
+                        </div>
+                    )}
                 </div>
                 <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
-                    <div className="flex items-center text-gray-500 mb-2"><Users size={16} className="mr-2" /><span>Total Workers ({title})</span></div>
-                    <p className="text-3xl font-bold text-gray-800">{data.count}</p>
+                    <div className="flex items-center text-gray-500 mb-2"><Users size={16} className="mr-2" /><span>Workers Paid ({title})</span></div>
+                    <p className="text-3xl font-bold text-gray-800">{data.current.count}</p>
+                     {data.countDiff && (
+                         <div className={`flex items-center mt-2 text-sm ${data.countDiff.diff >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                            {data.countDiff.diff >= 0 ? <TrendingUp size={16} className="mr-1" /> : <TrendingDown size={16} className="mr-1" />}
+                            <span>{data.countDiff.diff >= 0 ? '+' : ''}{data.countDiff.diff.toFixed(0)} workers ({data.countDiff.percentChange}%) vs last month</span>
+                        </div>
+                    )}
                 </div>
             </div>
             <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
                 <div className="p-6">
-                    <h3 className="text-xl font-semibold text-gray-800">{title} Details</h3>
-                    <p className="text-gray-500 mt-1">List of active {title.toLowerCase()} and their compensation.</p>
+                    <h3 className="text-xl font-semibold text-gray-800">{title} Payment Details</h3>
+                    <p className="text-gray-500 mt-1">Breakdown of payments for the current month.</p>
                 </div>
                 <div className="overflow-x-auto">
                     <table className="w-full text-sm text-left text-gray-500">
@@ -140,18 +228,18 @@ const DeelPayrollApp: React.FC = () => {
                             <tr>
                                 <th scope="col" className="px-6 py-3">Name</th>
                                 <th scope="col" className="px-6 py-3">Role</th>
-                                <th scope="col" className="px-6 py-3 text-right">Compensation</th>
+                                <th scope="col" className="px-6 py-3 text-right">Payment Amount</th>
                                 <th scope="col" className="px-6 py-3 text-center">Contract Status</th>
                             </tr>
                         </thead>
                         <tbody>
-                            {data.employees.map(emp => (
-                                <tr key={emp.id} className="bg-white border-b hover:bg-gray-50">
-                                    <th scope="row" className="px-6 py-4 font-medium text-gray-900 whitespace-nowrap">{emp.name}</th>
-                                    <td className="px-6 py-4">{emp.role}</td>
-                                    <td className="px-6 py-4 text-right font-semibold text-gray-800">{emp.compensation}</td>
+                            {data.current.payments.map(p => (
+                                <tr key={p.contractId} className="bg-white border-b hover:bg-gray-50">
+                                    <th scope="row" className="px-6 py-4 font-medium text-gray-900 whitespace-nowrap">{p.name}</th>
+                                    <td className="px-6 py-4">{p.role}</td>
+                                    <td className="px-6 py-4 text-right font-semibold text-gray-800">{formatCurrency(p.amount)}</td>
                                     <td className="px-6 py-4 text-center">
-                                        <span className={`px-3 py-1 rounded-full text-xs font-semibold ${emp.status === 'in_progress' || emp.status === 'active' ? 'bg-green-100 text-green-800' : 'bg-yellow-100 text-yellow-800'}`}>{emp.status}</span>
+                                        <span className={`px-3 py-1 rounded-full text-xs font-semibold ${p.status === 'in_progress' || p.status === 'active' ? 'bg-green-100 text-green-800' : 'bg-yellow-100 text-yellow-800'}`}>{p.status}</span>
                                     </td>
                                 </tr>
                             ))}
