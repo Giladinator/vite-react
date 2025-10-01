@@ -110,7 +110,6 @@ const DeelPayrollApp: React.FC = () => {
 
     try {
         const contracts = await callDeelApi<DeelContract[]>('/contracts', apiKey);
-        // --- ADDED FOR DEBUGGING ---
         console.log("--- Fetched Contracts ---", contracts);
         setAllContracts(contracts || []);
 
@@ -124,7 +123,6 @@ const DeelPayrollApp: React.FC = () => {
             fetchAllPaginatedData({ from_date: period2Start, to_date: period2End })
         ]);
         
-        // --- ADDED FOR DEBUGGING ---
         console.log(`--- Payments for ${months[month1].name} ${year1} ---`, p1Payments);
         console.log(`--- Payments for ${months[month2].name} ${year2} ---`, p2Payments);
         
@@ -151,51 +149,64 @@ const DeelPayrollApp: React.FC = () => {
     return { diff, percentChange };
   };
 
-  const processDashboardData = (contracts: DeelContract[]): DashboardData => {
-    const contractIds = new Set(contracts.map(c => c.id));
+  const processDashboardData = useMemo(() => {
+    return (contracts: DeelContract[]): DashboardData => {
+      const contractIds = new Set(contracts.map(c => c.id));
 
-    const processPayments = (payments: Payment[], year: number, month: number) => {
-        const filteredPayments = payments.filter(p => contractIds.has(p.contract_id));
-        const totalCost = filteredPayments.reduce((acc, p) => acc + parseFloat(p.amount), 0);
-        
-        const paymentsByContract = filteredPayments.reduce((acc, p) => {
-            acc[p.contract_id] = (acc[p.contract_id] || 0) + parseFloat(p.amount);
-            return acc;
-        }, {} as Record<string, number>);
+      const processPayments = (payments: Payment[], year: number, month: number) => {
+          const filteredPayments = payments.filter(p => contractIds.has(p.contract_id));
+          const totalCost = filteredPayments.reduce((acc, p) => acc + parseFloat(p.amount), 0);
+          
+          const paymentsByContract = filteredPayments.reduce((acc, p) => {
+              acc[p.contract_id] = (acc[p.contract_id] || 0) + parseFloat(p.amount);
+              return acc;
+          }, {} as Record<string, number>);
 
-        const employeePayments: EmployeePayment[] = Object.keys(paymentsByContract).map(contractId => {
-            const contract = contracts.find(c => c.id === contractId);
-            return {
-                contractId: contractId,
-                name: contract?.worker?.full_name || contract?.name || 'N/A',
-                role: contract?.job_title_name || 'N/A',
-                status: contract?.status || 'active',
-                amount: paymentsByContract[contractId]
-            }
-        });
-        
-        return { 
-            totalCost, 
-            count: employeePayments.length, 
-            payments: employeePayments,
-            label: `${months[month].name} ${year}`
-        };
+          const employeePayments: EmployeePayment[] = Object.keys(paymentsByContract).map(contractId => {
+              const contract = contracts.find(c => c.id === contractId);
+              return {
+                  contractId: contractId,
+                  name: contract?.worker?.full_name || contract?.name || 'N/A',
+                  role: contract?.job_title_name || 'N/A',
+                  status: contract?.status || 'active',
+                  amount: paymentsByContract[contractId]
+              }
+          });
+          
+          return { 
+              totalCost, 
+              count: employeePayments.length, 
+              payments: employeePayments,
+              label: `${months[month].name} ${year}`
+          };
+      };
+
+      const period1 = processPayments(period1Payments, year1, month1);
+      const period2 = processPayments(period2Payments, year2, month2);
+
+      return {
+          period1,
+          period2: { totalCost: period2.totalCost, count: period2.count, label: period2.label },
+          costDiff: calculateDifference(period1.totalCost, period2.totalCost),
+          countDiff: calculateDifference(period1.count, period2.count),
+      };
     };
+  }, [period1Payments, period2Payments, year1, month1, year2, month2]);
 
-    const period1 = processPayments(period1Payments, year1, month1);
-    const period2 = processPayments(period2Payments, year2, month2);
-
-    return {
-        period1,
-        period2: { totalCost: period2.totalCost, count: period2.count, label: period2.label },
-        costDiff: calculateDifference(period1.totalCost, period2.totalCost),
-        countDiff: calculateDifference(period1.count, period2.count),
-    };
-  };
-
-  const eorData = useMemo(() => processDashboardData(allContracts.filter(c => c.contract_type === 'eor')), [allContracts, period1Payments, period2Payments, year1, month1, year2, month2]);
-  const peoData = useMemo(() => processDashboardData(allContracts.filter(c => c.contract_type === 'peo')), [allContracts, period1Payments, period2Payments, year1, month1, year2, month2]);
-  const contractorData = useMemo(() => processDashboardData(allContracts.filter(c => ['ongoing_time_based', 'pay_as_you_go_time_based', 'milestones', 'fixed_rate'].includes(c.contract_type))), [allContracts, period1Payments, period2Payments, year1, month1, year2, month2]);
+  const eorData = useMemo(() => 
+    processDashboardData(allContracts.filter(c => c.contract_type === 'eor')), 
+    [allContracts, processDashboardData]
+  );
+  
+  const peoData = useMemo(() => 
+    processDashboardData(allContracts.filter(c => c.contract_type === 'peo')), 
+    [allContracts, processDashboardData]
+  );
+  
+  const contractorData = useMemo(() => 
+    processDashboardData(allContracts.filter(c => ['ongoing_time_based', 'pay_as_you_go_time_based', 'milestones', 'fixed_rate'].includes(c.contract_type))), 
+    [allContracts, processDashboardData]
+  );
 
   const renderAuthScreen = () => (
     <div className="w-full max-w-md mx-auto bg-white p-8 rounded-2xl shadow-lg border border-gray-100">
