@@ -1,5 +1,5 @@
-import React, { useState, useEffect, useMemo } from 'react';
-import { AlertCircle, Download, RefreshCw, Users, DollarSign, TrendingUp, TrendingDown, Loader2, ChevronsUpDown } from 'lucide-react';
+import React, { useState, useMemo } from 'react';
+import { AlertCircle, Download, RefreshCw, Users, DollarSign, TrendingUp, TrendingDown, Loader2 } from 'lucide-react';
 
 // --- Enhanced Type Definitions ---
 type EmployeeType = 'EOR' | 'Contractor' | 'PEO';
@@ -10,7 +10,7 @@ interface Employee {
   type: EmployeeType;
   country: string;
   net: number;
-  status: 'paid' | 'processing' | 'pending' | 'completed'; // Deel API uses lowercase
+  status: 'paid' | 'processing' | 'pending' | 'completed' | 'overdue' | string; // Deel API uses lowercase and has other statuses
   uniqueId: string; // Composite key of name and type
 }
 
@@ -33,7 +33,7 @@ interface DifferenceCalculation {
 
 // --- API Helper ---
 const callDeelApi = async <T>(endpoint: string, apiKey: string, params: Record<string, string> = {}): Promise<T> => {
-  const API_BASE_URL = 'https://api-sandbox.demo.deel.com/rest/v2';
+  const API_BASE_URL = 'https://api.letsdeel.com/rest/v2';
   const url = new URL(`${API_BASE_URL}${endpoint}`);
   Object.entries(params).forEach(([key, value]) => url.searchParams.append(key, value));
   
@@ -43,16 +43,20 @@ const callDeelApi = async <T>(endpoint: string, apiKey: string, params: Record<s
 
   if (!response.ok) {
     const errorData = await response.json().catch(() => ({}));
-    throw new Error(errorData.errors?.[0]?.message || `API error: ${response.statusText}`);
+    const errorMessage = errorData.errors?.[0]?.message || `API error: ${response.status} ${response.statusText}`;
+    throw new Error(errorMessage);
   }
   return response.json();
 };
 
 // --- Data Fetching Logic ---
 const fetchAllPayrollData = async (apiKey: string): Promise<PayrollCycle[]> => {
-    // Current date is October 2025
-    const toDate = '2025-10-31';
-    const fromDate = '2025-08-01'; // Fetch last 3 months for comparison
+    const toDate = new Date();
+    const fromDate = new Date();
+    fromDate.setMonth(toDate.getMonth() - 2); // Fetch last 3 months for comparison
+    
+    const toDateString = toDate.toISOString().split('T')[0];
+    const fromDateString = fromDate.toISOString().split('T')[0];
 
     // 1. Fetch EOR Payroll Data (Global Payroll)
     const eorReports = await callDeelApi<any[]>('/gp/reports', apiKey);
@@ -62,12 +66,11 @@ const fetchAllPayrollData = async (apiKey: string): Promise<PayrollCycle[]> => {
     const eorData = await Promise.all(eorPayslipsPromises);
 
     // 2. Fetch Contractor Invoices
-    const contractorInvoices = await callDeelApi<any>('/invoices', apiKey, { issued_from: fromDate, issued_to: toDate, limit: '99' });
+    const contractorInvoices = await callDeelApi<any>('/invoices', apiKey, { issued_from: fromDateString, issued_to: toDateString, limit: '99' });
 
     // PEO endpoint is not publicly documented in the standard API reference.
     // We will proceed with EOR and Contractors, which are supported.
     
-    // --- Data Transformation ---
     const cyclesMap = new Map<string, PayrollCycle>();
 
     // Process EOR data
@@ -78,7 +81,6 @@ const fetchAllPayrollData = async (apiKey: string): Promise<PayrollCycle[]> => {
         let cycleId = `${year}-${String(month + 1).padStart(2, '0')}`;
         let cycleLabel = date.toLocaleString('default', { month: 'long', year: 'numeric', timeZone: 'UTC' });
 
-        // Handle US bi-monthly payroll
         if (payslips.some((p: any) => p.country === 'US')) {
              const day = date.getUTCDate();
              if (day < 16) {
@@ -98,13 +100,8 @@ const fetchAllPayrollData = async (apiKey: string): Promise<PayrollCycle[]> => {
         cycle.employeeCount += report.employees_count;
         payslips.forEach((p: any) => {
             cycle.employees.push({
-                id: p.id,
-                name: p.employee_name,
-                type: 'EOR',
-                country: p.country,
-                net: parseFloat(p.net_pay),
-                status: p.status.toLowerCase(),
-                uniqueId: `${p.employee_name}-EOR`
+                id: p.id, name: p.employee_name, type: 'EOR', country: p.country,
+                net: parseFloat(p.net_pay), status: p.status.toLowerCase(), uniqueId: `${p.employee_name}-EOR`
             });
         });
     });
@@ -124,19 +121,13 @@ const fetchAllPayrollData = async (apiKey: string): Promise<PayrollCycle[]> => {
         cycle.totalCost += parseFloat(inv.total);
         cycle.employeeCount += 1;
         cycle.employees.push({
-            id: inv.id,
-            name: inv.contract.name,
-            type: 'Contractor',
-            country: inv.contract.client.legal_entity.country,
-            net: parseFloat(inv.total),
-            status: inv.status.toLowerCase() as Employee['status'],
-            uniqueId: `${inv.contract.name}-Contractor`
+            id: inv.id, name: inv.contract.name, type: 'Contractor', country: inv.contract.client.legal_entity.country,
+            net: parseFloat(inv.total), status: inv.status.toLowerCase(), uniqueId: `${inv.contract.name}-Contractor`
         });
     });
 
     return Array.from(cyclesMap.values()).sort((a, b) => b.cycleId.localeCompare(a.cycleId));
 };
-
 
 // --- React Component ---
 const DeelPayrollApp: React.FC = () => {
@@ -150,23 +141,28 @@ const DeelPayrollApp: React.FC = () => {
 
     const handleFetchData = async () => {
         if (!apiKey) {
-            setError('Please enter your Deel API Key.');
-            return;
+          setError('Please enter your Deel API Key.');
+          return;
         }
         setLoading(true);
         setError('');
         try {
-            const cycles = await fetchAllPayrollData(apiKey);
+          const cycles = await fetchAllPayrollData(apiKey);
+          if (cycles.length === 0) {
+            setError('No payroll data found for the recent period.');
+            setPayrollData(null);
+          } else {
             setPayrollData({ cycles });
             setIsAuthenticated(true);
             setCurrentCycleIndex(0);
+          }
         } catch (err: any) {
-            setError(err.message || 'An unknown error occurred.');
-            setIsAuthenticated(false);
+          setError(err.message || 'An unknown error occurred.');
+          setIsAuthenticated(false);
         } finally {
-            setLoading(false);
+          setLoading(false);
         }
-    };
+      };
 
     const filteredCycles = useMemo(() => {
         if (!payrollData) return null;
@@ -223,7 +219,7 @@ const DeelPayrollApp: React.FC = () => {
     );
     
     const renderDashboard = () => {
-        if (!currentCycle) return <div className="text-center text-gray-500">No data available for the selected filters.</div>;
+        if (!currentCycle) return <div className="text-center text-gray-500 p-8 bg-white rounded-lg shadow-md">No data available for the selected filters. Please try another combination.</div>;
 
         return (
           <div className="w-full">
@@ -236,7 +232,7 @@ const DeelPayrollApp: React.FC = () => {
                             onChange={e => setCurrentCycleIndex(Number(e.target.value))}
                             className="p-2 rounded-lg border bg-white hover:bg-gray-50 text-gray-600 font-semibold"
                         >
-                            {payrollData?.cycles.map((c, index) => <option key={c.cycleId} value={index}>{c.cycleLabel}</option>)}
+                            {filteredCycles?.map((c, index) => <option key={c.cycleId} value={index}>{c.cycleLabel}</option>)}
                         </select>
                         <span className="text-gray-500">vs {previousCycle?.cycleLabel || 'N/A'}</span>
                     </div>
@@ -244,13 +240,12 @@ const DeelPayrollApp: React.FC = () => {
                 <div className="flex items-center space-x-2 mt-4 sm:mt-0">
                     <select
                         value={selectedType}
-                        onChange={(e) => setSelectedType(e.target.value as any)}
+                        onChange={(e) => setSelectedType(e.target.value as EmployeeType | 'All')}
                         className="p-2 rounded-lg border bg-white hover:bg-gray-50 font-semibold"
                     >
                         <option value="All">All Workers</option>
                         <option value="EOR">EOR Employees</option>
                         <option value="Contractor">Contractors</option>
-                        {/* <option value="PEO">PEO Employees</option> */}
                     </select>
                     <button onClick={handleFetchData} disabled={loading} className="p-2 rounded-lg border bg-white hover:bg-gray-50 disabled:opacity-50">
                         {loading ? <Loader2 className="animate-spin" size={20} /> : <RefreshCw size={20} />}
@@ -270,28 +265,24 @@ const DeelPayrollApp: React.FC = () => {
                     <table className="w-full text-sm text-left text-gray-500">
                         <thead className="bg-gray-50 text-xs text-gray-700 uppercase">
                             <tr>
-                                <th className="px-6 py-3">Worker Name</th>
-                                <th className="px-6 py-3">Type</th>
-                                <th className="px-6 py-3">Country</th>
-                                <th className="px-6 py-3 text-right">Net Payment</th>
-                                <th className="px-6 py-3 text-right">Previous Net</th>
-                                <th className="px-6 py-3 text-right">Change</th>
-                                <th className="px-6 py-3 text-center">Status</th>
+                                <th className="px-6 py-3">Worker Name</th><th className="px-6 py-3">Type</th><th className="px-6 py-3">Country</th>
+                                <th className="px-6 py-3 text-right">Net Payment</th><th className="px-6 py-3 text-right">Previous Net</th>
+                                <th className="px-6 py-3 text-right">Change</th><th className="px-6 py-3 text-center">Status</th>
                             </tr>
                         </thead>
                         <tbody>
                             {currentCycle.employees.map(emp => {
                                 const prevEmp = previousCycle?.employees.find(p => p.uniqueId === emp.uniqueId);
-                                const change = emp.net - (prevEmp?.net || 0);
+                                const change = emp.net - (prevEmp?.net ?? 0);
                                 return (
                                 <tr key={emp.id} className="bg-white border-b hover:bg-gray-50">
                                     <td className="px-6 py-4 font-medium text-gray-900">{emp.name}</td>
-                                    <td className="px-6 py-4"><span className={`px-2 py-1 text-xs rounded-full ${emp.type === 'EOR' ? 'bg-blue-100 text-blue-800' : 'bg-purple-100 text-purple-800'}`}>{emp.type}</span></td>
+                                    <td className="px-6 py-4"><span className={`px-2 py-1 text-xs rounded-full font-semibold ${emp.type === 'EOR' ? 'bg-blue-100 text-blue-800' : 'bg-purple-100 text-purple-800'}`}>{emp.type}</span></td>
                                     <td className="px-6 py-4">{emp.country}</td>
                                     <td className="px-6 py-4 text-right font-semibold text-gray-800">${formatCurrency(emp.net)}</td>
                                     <td className="px-6 py-4 text-right">{prevEmp ? `$${formatCurrency(prevEmp.net)}` : '-'}</td>
-                                    <td className="px-6 py-4 text-right">{!prevEmp ? <span className="text-green-600">New</span> : change !== 0 ? <span className={`font-semibold ${change > 0 ? 'text-green-600' : 'text-red-600'}`}>{change > 0 ? '+' : ''}${formatCurrency(change)}</span> : <span>$0.00</span>}</td>
-                                    <td className="px-6 py-4 text-center"><span className="capitalize px-3 py-1 rounded-full text-xs font-semibold bg-gray-100 text-gray-800">{emp.status}</span></td>
+                                    <td className="px-6 py-4 text-right">{!prevEmp ? <span className="text-green-600 font-semibold">New</span> : change !== 0 ? <span className={`font-semibold ${change > 0 ? 'text-green-600' : 'text-red-600'}`}>{change > 0 ? '+' : ''}${formatCurrency(change)}</span> : <span className="text-gray-500">$0.00</span>}</td>
+                                    <td className="px-6 py-4 text-center"><span className="capitalize px-3 py-1 rounded-full text-xs font-semibold bg-gray-100 text-gray-800">{emp.status.replace('_', ' ')}</span></td>
                                 </tr>
                                 );
                             })}
@@ -319,10 +310,10 @@ const StatCard: React.FC<{ title: string; value: string; diff?: DifferenceCalcul
             <span>{title}</span>
         </div>
         <p className="text-3xl font-bold text-gray-800">{value}</p>
-        {diff && (
+        {diff && diff.diff !== 0 && (
             <div className={`flex items-center mt-2 text-sm ${diff.diff >= 0 ? 'text-green-600' : 'text-red-600'}`}>
                 {diff.diff >= 0 ? <TrendingUp size={16} className="mr-1" /> : <TrendingDown size={16} className="mr-1" />}
-                <span>{diff.diff >= 0 ? '+' : ''}{isInt ? diff.diff.toFixed(0) : `$${diff.diff.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`} ({diff.percentChange}%) vs last cycle</span>
+                <span>{diff.diff >= 0 ? '+' : ''}{isInt ? diff.diff.toFixed(0) : `$${(diff.diff).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`} ({diff.percentChange}%) vs last cycle</span>
             </div>
         )}
     </div>
