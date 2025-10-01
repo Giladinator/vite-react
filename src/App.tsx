@@ -160,11 +160,9 @@ const DeelPayrollApp: React.FC = () => {
           placeholder="Enter your Deel API Key"
           className="w-full px-4 py-3 rounded-lg border border-gray-300 focus:outline-none focus:ring-2 focus:ring-blue-500 transition"
         />
-        <button
-          onClick={handleFetchData}
-          disabled={loading}
-          className="w-full bg-blue-600 text-white font-semibold py-3 px-4 rounded-lg hover:bg-blue-700 transition-all duration-200 flex items-center justify-center disabled:bg-blue-300"
-        >
+      <button onClick={handleFetchData} disabled={loading} className="p-2 rounded-lg border bg-white hover:bg-gray-50 transition flex items-center justify-center disabled:opacity-50">
+              {loading ? <Loader2 className="animate-spin" size={20} /> : <RefreshCw size={20} />}
+            </button>
           {loading ? (
             <>
               <Loader2 className="animate-spin mr-2" size={20} />
