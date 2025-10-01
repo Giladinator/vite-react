@@ -167,16 +167,32 @@ const DeelPayrollApp: React.FC = () => {
         <div className="space-y-4">
           <input type="password" value={apiKey} onChange={(e) => setApiKey(e.target.value)} placeholder="Enter your Deel API Key" className="w-full px-4 py-3 rounded-lg border border-gray-300 focus:outline-none focus:ring-2 focus:ring-blue-500"/>
           <button onClick={handleFetchData} disabled={loading} className="w-full bg-blue-600 text-white font-semibold py-3 px-4 rounded-lg hover:bg-blue-700 flex items-center justify-center disabled:bg-blue-300">
-            {loading ? <><Loader2 className="animate-spin mr-2" size={20} /><span>Connecting...</span></> : <span>Connect & View Payroll</span>}
+            {loading ? (
+              <>
+                <Loader2 className="animate-spin mr-2" size={20} />
+                <span>Connecting...</span>
+              </>
+            ) : (
+              <span>Connect & View Payroll</span>
+            )}
           </button>
         </div>
-        {error && <div className="mt-4 text-center text-sm text-red-600 bg-red-50 p-3 rounded-lg flex items-center justify-center"><AlertCircle size={16} className="mr-2" /><span>{error}</span></div>}
+        {error && (
+          <div className="mt-4 text-center text-sm text-red-600 bg-red-50 p-3 rounded-lg flex items-center justify-center">
+            <AlertCircle size={16} className="mr-2" />
+            <span>{error}</span>
+          </div>
+        )}
         <p className="text-xs text-gray-400 mt-4 text-center">API key is not stored and used for this session only.</p>
       </div>
     );
     
     const renderDashboard = () => {
-        if (!currentCycle) return <div className="text-center text-gray-500 p-8 bg-white rounded-lg shadow-md">No data available for the selected filters. Please try another combination.</div>;
+        if (!currentCycle) return (
+          <div className="text-center text-gray-500 p-8 bg-white rounded-lg shadow-md">
+            No data available for the selected filters. Please try another combination.
+          </div>
+        );
 
         return (
           <div className="w-full">
@@ -184,17 +200,35 @@ const DeelPayrollApp: React.FC = () => {
                 <div>
                     <h1 className="text-3xl font-bold text-gray-800">Payroll Comparison</h1>
                     <div className="flex items-center space-x-2 mt-2">
-                        <select value={currentCycleIndex} onChange={e => setCurrentCycleIndex(Number(e.target.value))} className="p-2 rounded-lg border bg-white hover:bg-gray-50 text-gray-600 font-semibold">
-                            {filteredCycles?.map((c, index) => <option key={c.cycleId} value={index}>{c.cycleLabel}</option>)}
+                        <select 
+                          value={currentCycleIndex} 
+                          onChange={e => setCurrentCycleIndex(Number(e.target.value))} 
+                          className="p-2 rounded-lg border bg-white hover:bg-gray-50 text-gray-600 font-semibold"
+                        >
+                            {filteredCycles?.map((c, index) => (
+                              <option key={c.cycleId} value={index}>
+                                {c.cycleLabel}
+                              </option>
+                            ))}
                         </select>
                         <span className="text-gray-500">vs {previousCycle?.cycleLabel || 'N/A'}</span>
                     </div>
                 </div>
                 <div className="flex items-center space-x-2 mt-4 sm:mt-0">
-                    <select value={selectedType} onChange={(e) => setSelectedType(e.target.value as EmployeeType | 'All')} className="p-2 rounded-lg border bg-white hover:bg-gray-50 font-semibold">
-                        <option value="All">All Workers</option><option value="EOR">EOR Employees</option><option value="Contractor">Contractors</option>
+                    <select 
+                      value={selectedType} 
+                      onChange={(e) => setSelectedType(e.target.value as EmployeeType | 'All')} 
+                      className="p-2 rounded-lg border bg-white hover:bg-gray-50 font-semibold"
+                    >
+                        <option value="All">All Workers</option>
+                        <option value="EOR">EOR Employees</option>
+                        <option value="Contractor">Contractors</option>
                     </select>
-                    <button onClick={handleFetchData} disabled={loading} className="p-2 rounded-lg border bg-white hover:bg-gray-50 disabled:opacity-50">
+                    <button 
+                      onClick={handleFetchData} 
+                      disabled={loading} 
+                      className="p-2 rounded-lg border bg-white hover:bg-gray-50 disabled:opacity-50"
+                    >
                         {loading ? <Loader2 className="animate-spin" size={20} /> : <RefreshCw size={20} />}
                     </button>
                 </div>
@@ -205,31 +239,61 @@ const DeelPayrollApp: React.FC = () => {
                 <StatCard title="Previous Cycle Cost" value={previousCycle ? `$${formatCurrency(previousCycle.totalCost)}` : 'N/A'} />
             </div>
             <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
-                <div className="p-6"><h3 className="text-xl font-semibold text-gray-800">Payment Breakdown</h3></div>
+                <div className="p-6">
+                  <h3 className="text-xl font-semibold text-gray-800">Payment Breakdown</h3>
+                </div>
                 <div className="overflow-x-auto">
-                    <table className="w-full text-sm text-left text-gray-500"><thead className="bg-gray-50 text-xs text-gray-700 uppercase"><tr>
-                        <th className="px-6 py-3">Worker Name</th><th className="px-6 py-3">Type</th><th className="px-6 py-3">Country</th>
-                        <th className="px-6 py-3 text-right">Net Payment</th><th className="px-6 py-3 text-right">Previous Net</th>
-                        <th className="px-6 py-3 text-right">Change</th><th className="px-6 py-3 text-center">Status</th>
-                    </tr></thead><tbody>
-                        {currentCycle.employees.map(emp => {
-                            const prevEmp = previousCycle?.employees.find(p => p.uniqueId === emp.uniqueId);
-                            const change = emp.net - (prevEmp?.net ?? 0);
-                            const changeStr = !prevEmp ? <span className="text-green-600 font-semibold">New</span> : change !== 0 ? <span className={`font-semibold ${change > 0 ? 'text-green-600' : 'text-red-600'}`}>{change > 0 ? '+' : ''}${formatCurrency(change)}</span> : <span className="text-gray-500">$0.00</span>;
-                            const typeClassName = `px-2 py-1 text-xs rounded-full font-semibold ${emp.type === 'EOR' ? 'bg-blue-100 text-blue-800' : 'bg-purple-100 text-purple-800'}`;
+                    <table className="w-full text-sm text-left text-gray-500">
+                        <thead className="bg-gray-50 text-xs text-gray-700 uppercase">
+                            <tr>
+                                <th className="px-6 py-3">Worker Name</th>
+                                <th className="px-6 py-3">Type</th>
+                                <th className="px-6 py-3">Country</th>
+                                <th className="px-6 py-3 text-right">Net Payment</th>
+                                <th className="px-6 py-3 text-right">Previous Net</th>
+                                <th className="px-6 py-3 text-right">Change</th>
+                                <th className="px-6 py-3 text-center">Status</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {currentCycle.employees.map(emp => {
+                                const prevEmp = previousCycle?.employees.find(p => p.uniqueId === emp.uniqueId);
+                                const change = emp.net - (prevEmp?.net ?? 0);
+                                const changeStr = !prevEmp ? (
+                                    <span className="text-green-600 font-semibold">New</span>
+                                ) : change !== 0 ? (
+                                    <span className={`font-semibold ${change > 0 ? 'text-green-600' : 'text-red-600'}`}>
+                                        {change > 0 ? '+' : ''}${formatCurrency(change)}
+                                    </span>
+                                ) : (
+                                    <span className="text-gray-500">$0.00</span>
+                                );
+                                const typeClassName = `px-2 py-1 text-xs rounded-full font-semibold ${emp.type === 'EOR' ? 'bg-blue-100 text-blue-800' : 'bg-purple-100 text-purple-800'}`;
 
-                            return (
-                            <tr key={emp.id} className="bg-white border-b hover:bg-gray-50">
-                                <td className="px-6 py-4 font-medium text-gray-900">{emp.name}</td>
-                                <td className="px-6 py-4"><span className={typeClassName}>{emp.type}</span></td>
-                                <td className="px-6 py-4">{emp.country}</td>
-                                <td className="px-6 py-4 text-right font-semibold text-gray-800">${formatCurrency(emp.net)}</td>
-                                <td className="px-6 py-4 text-right">{prevEmp ? `$${formatCurrency(prevEmp.net)}` : '-'}</td>
-                                <td className="px-6 py-4 text-right">{changeStr}</td>
-                                <td className="px-6 py-4 text-center"><span className="capitalize px-3 py-1 rounded-full text-xs font-semibold bg-gray-100 text-gray-800">{emp.status.replace('_', ' ')}</span></td>
-                            </tr>);
-                        })}
-                    </tbody></table>
+                                return (
+                                    <tr key={emp.id} className="bg-white border-b hover:bg-gray-50">
+                                        <td className="px-6 py-4 font-medium text-gray-900">{emp.name}</td>
+                                        <td className="px-6 py-4">
+                                          <span className={typeClassName}>{emp.type}</span>
+                                        </td>
+                                        <td className="px-6 py-4">{emp.country}</td>
+                                        <td className="px-6 py-4 text-right font-semibold text-gray-800">
+                                          ${formatCurrency(emp.net)}
+                                        </td>
+                                        <td className="px-6 py-4 text-right">
+                                          {prevEmp ? `$${formatCurrency(prevEmp.net)}` : '-'}
+                                        </td>
+                                        <td className="px-6 py-4 text-right">{changeStr}</td>
+                                        <td className="px-6 py-4 text-center">
+                                            <span className="capitalize px-3 py-1 rounded-full text-xs font-semibold bg-gray-100 text-gray-800">
+                                                {emp.status.replace('_', ' ')}
+                                            </span>
+                                        </td>
+                                    </tr>
+                                );
+                            })}
+                        </tbody>
+                    </table>
                 </div>
             </div>
           </div>
@@ -260,7 +324,9 @@ const StatCard: React.FC<StatCardProps> = ({ title, value, diff, isInt }) => {
         return `${prefix}${valueStr} (${diff.percentChange}%) vs last cycle`;
     }, [diff, isInt]);
 
-    const trendIcon = diff && diff.diff !== 0 ? (diff.diff > 0 ? <TrendingUp size={16} className="mr-1" /> : <TrendingDown size={16} className="mr-1" />) : null;
+    const trendIcon = diff && diff.diff !== 0 ? (
+      diff.diff > 0 ? <TrendingUp size={16} className="mr-1" /> : <TrendingDown size={16} className="mr-1" />
+    ) : null;
     const diffClassName = `flex items-center mt-2 text-sm ${!diff || diff.diff === 0 ? '' : diff.diff > 0 ? 'text-green-600' : 'text-red-600'}`;
 
     return (
@@ -281,4 +347,3 @@ const StatCard: React.FC<StatCardProps> = ({ title, value, diff, isInt }) => {
 };
 
 export default DeelPayrollApp;
-
