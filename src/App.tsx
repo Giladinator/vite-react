@@ -1,43 +1,29 @@
-import React, { useState } from 'react';
-import { AlertCircle, Download, RefreshCw, Users, DollarSign, TrendingUp, TrendingDown, Loader2 } from 'lucide-react';
+import React, { useState, useEffect, useMemo } from 'react';
+import { AlertCircle, Download, RefreshCw, Users, DollarSign, TrendingUp, TrendingDown, Loader2, ChevronsUpDown } from 'lucide-react';
 
-// --- Type Definitions for Deel API Responses ---
-interface DeelPayrollReport {
-  id: string;
-  start_date: string;
-  end_date: string;
-  total: string;
-  employees_count: number;
-}
+// --- Enhanced Type Definitions ---
+type EmployeeType = 'EOR' | 'Contractor' | 'PEO';
 
-interface DeelPayslip {
-  id: string;
-  employee_name: string;
-  country: string;
-  net_pay: string;
-  status: string;
-}
-
-// --- Type Definitions for Application State ---
 interface Employee {
   id: string;
   name: string;
-  role: string;
+  type: EmployeeType;
   country: string;
   net: number;
-  status: 'Paid' | 'Processing' | 'Pending' | 'Completed';
+  status: 'paid' | 'processing' | 'pending' | 'completed'; // Deel API uses lowercase
+  uniqueId: string; // Composite key of name and type
 }
 
 interface PayrollCycle {
-  cycle: string;
+  cycleId: string; // e.g., '2025-09' or '2025-09-1' for bi-monthly
+  cycleLabel: string; // e.g., 'September 2025' or 'September 2025 (1st Half)'
   totalCost: number;
   employeeCount: number;
   employees: Employee[];
 }
 
 interface PayrollData {
-  current: PayrollCycle;
-  previous: PayrollCycle | null;
+  cycles: PayrollCycle[];
 }
 
 interface DifferenceCalculation {
@@ -46,278 +32,301 @@ interface DifferenceCalculation {
 }
 
 // --- API Helper ---
-const callDeelApi = async <T,>(endpoint: string, apiKey: string): Promise<T> => {
+const callDeelApi = async <T>(endpoint: string, apiKey: string, params: Record<string, string> = {}): Promise<T> => {
   const API_BASE_URL = 'https://api-sandbox.demo.deel.com/rest/v2';
-  const url = `${API_BASE_URL}${endpoint}`;
+  const url = new URL(`${API_BASE_URL}${endpoint}`);
+  Object.entries(params).forEach(([key, value]) => url.searchParams.append(key, value));
   
-  console.log('Calling Deel API:', url);
-  
-  const response = await fetch(url, {
-    headers: {
-      'Authorization': `Bearer ${apiKey}`,
-      'Content-Type': 'application/json',
-    },
+  const response = await fetch(url.toString(), {
+    headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
   });
 
   if (!response.ok) {
-    let errorMessage = `API error: ${response.status} ${response.statusText}`;
-    try {
-      const errorData = await response.json();
-      errorMessage = errorData.errors?.[0]?.message || errorData.message || errorMessage;
-    } catch (e) {
-      // If error response is not JSON, use the status text
-    }
-    throw new Error(errorMessage);
+    const errorData = await response.json().catch(() => ({}));
+    throw new Error(errorData.errors?.[0]?.message || `API error: ${response.statusText}`);
   }
   return response.json();
 };
 
-const DeelPayrollApp: React.FC = () => {
-  const [apiKey, setApiKey] = useState<string>('');
-  const [isAuthenticated, setIsAuthenticated] = useState<boolean>(false);
-  const [loading, setLoading] = useState<boolean>(false);
-  const [error, setError] = useState<string>('');
-  const [payrollData, setPayrollData] = useState<PayrollData | null>(null);
+// --- Data Fetching Logic ---
+const fetchAllPayrollData = async (apiKey: string): Promise<PayrollCycle[]> => {
+    // Current date is October 2025
+    const toDate = '2025-10-31';
+    const fromDate = '2025-08-01'; // Fetch last 3 months for comparison
 
-  const handleFetchData = async () => {
-    if (!apiKey) {
-      setError('Please enter your Deel API Key.');
-      return;
-    }
-    setLoading(true);
-    setError('');
-    setPayrollData(null);
+    // 1. Fetch EOR Payroll Data (Global Payroll)
+    const eorReports = await callDeelApi<any[]>('/gp/reports', apiKey);
+    const eorPayslipsPromises = eorReports.map(report => 
+        callDeelApi<any[]>(`/gp/reports/${report.id}/payslips`, apiKey).then(payslips => ({ report, payslips }))
+    );
+    const eorData = await Promise.all(eorPayslipsPromises);
 
-    try {
-      // Try to fetch contracts first to verify API key works
-      const testResponse = await callDeelApi<any>('/contracts', apiKey);
-      console.log('Test API response:', testResponse);
-      
-      const reports = await callDeelApi<DeelPayrollReport[]>('/gp/reports', apiKey);
-      if (!reports || reports.length === 0) {
-        setError('No payroll reports found for this API key.');
-        setLoading(false);
-        return;
-      }
-      
-      const currentReport = reports[0];
-      const previousReport = reports.length > 1 ? reports[1] : null;
+    // 2. Fetch Contractor Invoices
+    const contractorInvoices = await callDeelApi<any>('/invoices', apiKey, { issued_from: fromDate, issued_to: toDate, limit: '99' });
 
-      const payslipPromises = [
-        callDeelApi<DeelPayslip[]>(`/gp/reports/${currentReport.id}/payslips`, apiKey),
-      ];
+    // PEO endpoint is not publicly documented in the standard API reference.
+    // We will proceed with EOR and Contractors, which are supported.
+    
+    // --- Data Transformation ---
+    const cyclesMap = new Map<string, PayrollCycle>();
 
-      if (previousReport) {
-        payslipPromises.push(callDeelApi<DeelPayslip[]>(`/gp/reports/${previousReport.id}/payslips`, apiKey));
-      } else {
-        payslipPromises.push(Promise.resolve([]));
-      }
-
-      const [currentPayslips, previousPayslips] = await Promise.all(payslipPromises);
-      
-      const formatCycle = (report: DeelPayrollReport, payslips: DeelPayslip[]): PayrollCycle => {
+    // Process EOR data
+    eorData.forEach(({ report, payslips }) => {
         const date = new Date(report.start_date + 'T00:00:00Z');
-        const month = date.toLocaleString('default', { month: 'long', timeZone: 'UTC' });
         const year = date.getUTCFullYear();
-        
-        return {
-          cycle: `${month} ${year}`,
-          totalCost: parseFloat(report.total),
-          employeeCount: report.employees_count,
-          employees: payslips.map(p => ({
-            id: p.id,
-            name: p.employee_name,
-            role: 'N/A',
-            country: p.country,
-            net: parseFloat(p.net_pay),
-            status: (p.status.charAt(0).toUpperCase() + p.status.slice(1)) as Employee['status'],
-          })),
-        };
-      };
+        const month = date.getUTCMonth();
+        let cycleId = `${year}-${String(month + 1).padStart(2, '0')}`;
+        let cycleLabel = date.toLocaleString('default', { month: 'long', year: 'numeric', timeZone: 'UTC' });
 
-      const formattedData: PayrollData = {
-        current: formatCycle(currentReport, currentPayslips),
-        previous: previousReport && previousPayslips ? formatCycle(previousReport, previousPayslips) : null,
-      };
+        // Handle US bi-monthly payroll
+        if (payslips.some((p: any) => p.country === 'US')) {
+             const day = date.getUTCDate();
+             if (day < 16) {
+                 cycleId += '-1';
+                 cycleLabel += ' (1st Half)';
+             } else {
+                 cycleId += '-2';
+                 cycleLabel += ' (2nd Half)';
+             }
+        }
 
-      setPayrollData(formattedData);
-      setIsAuthenticated(true);
-    } catch (err: any) {
-      setError(err.message || 'An unknown error occurred.');
-      setIsAuthenticated(false);
-    } finally {
-      setLoading(false);
-    }
-  };
+        if (!cyclesMap.has(cycleId)) {
+            cyclesMap.set(cycleId, { cycleId, cycleLabel, totalCost: 0, employeeCount: 0, employees: [] });
+        }
+        const cycle = cyclesMap.get(cycleId)!;
+        cycle.totalCost += parseFloat(report.total);
+        cycle.employeeCount += report.employees_count;
+        payslips.forEach((p: any) => {
+            cycle.employees.push({
+                id: p.id,
+                name: p.employee_name,
+                type: 'EOR',
+                country: p.country,
+                net: parseFloat(p.net_pay),
+                status: p.status.toLowerCase(),
+                uniqueId: `${p.employee_name}-EOR`
+            });
+        });
+    });
 
-  const calculateDifference = (current: number, previous: number | undefined): DifferenceCalculation => {
-    if (previous === undefined || previous === 0) return { diff: current, percentChange: '100.00' };
-    const diff = current - previous;
-    const percentChange = ((diff / previous) * 100).toFixed(2);
-    return { diff, percentChange };
-  };
+    // Process Contractor data
+    (contractorInvoices.data || contractorInvoices).forEach((inv: any) => {
+        const date = new Date(inv.paid_at || inv.created_at);
+        const year = date.getFullYear();
+        const month = date.getMonth();
+        const cycleId = `${year}-${String(month + 1).padStart(2, '0')}`;
+        const cycleLabel = date.toLocaleString('default', { month: 'long', year: 'numeric' });
 
-  const totalCostDiff = payrollData ? calculateDifference(payrollData.current.totalCost, payrollData.previous?.totalCost) : null;
-  const employeeCountDiff = payrollData ? calculateDifference(payrollData.current.employeeCount, payrollData.previous?.employeeCount) : null;
-  
-  const formatCurrency = (value: number) => value.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+        if (!cyclesMap.has(cycleId)) {
+            cyclesMap.set(cycleId, { cycleId, cycleLabel, totalCost: 0, employeeCount: 0, employees: [] });
+        }
+        const cycle = cyclesMap.get(cycleId)!;
+        cycle.totalCost += parseFloat(inv.total);
+        cycle.employeeCount += 1;
+        cycle.employees.push({
+            id: inv.id,
+            name: inv.contract.name,
+            type: 'Contractor',
+            country: inv.contract.client.legal_entity.country,
+            net: parseFloat(inv.total),
+            status: inv.status.toLowerCase() as Employee['status'],
+            uniqueId: `${inv.contract.name}-Contractor`
+        });
+    });
 
-  const renderAuthScreen = () => (
-    <div className="w-full max-w-md mx-auto bg-white p-8 rounded-2xl shadow-lg border border-gray-100">
-      <h2 className="text-2xl font-bold text-center text-gray-800 mb-2">Connect to Deel</h2>
-      <p className="text-center text-gray-500 mb-6">Enter your API key to view your payroll dashboard.</p>
-      <div className="space-y-4">
-        <input
-          type="password"
-          value={apiKey}
-          onChange={(e) => setApiKey(e.target.value)}
-          placeholder="Enter your Deel API Key"
-          className="w-full px-4 py-3 rounded-lg border border-gray-300 focus:outline-none focus:ring-2 focus:ring-blue-500 transition"
-        />
-        <button
-          onClick={handleFetchData}
-          disabled={loading}
-          className="w-full bg-blue-600 text-white font-semibold py-3 px-4 rounded-lg hover:bg-blue-700 transition-all duration-200 flex items-center justify-center disabled:bg-blue-300"
-        >
-          {loading ? (
-            <>
-              <Loader2 className="animate-spin mr-2" size={20} />
-              Connecting...
-            </>
-          ) : (
-            'Connect & View Payroll'
-          )}
-        </button>
-      </div>
-      {error && (
-        <div className="mt-4 text-center text-sm text-red-600 bg-red-50 p-3 rounded-lg flex items-center justify-center">
-          <AlertCircle size={16} className="mr-2" />
-          {error}
-        </div>
-      )}
-      <p className="text-xs text-gray-400 mt-4 text-center">Your API key is used only for this session and is not stored.</p>
-    </div>
-  );
-
-  const renderDashboard = () => (
-    payrollData && (
-      <div className="w-full">
-        <header className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-8">
-          <div>
-            <h1 className="text-3xl font-bold text-gray-800">Payroll Overview</h1>
-            <p className="text-gray-500 mt-1">Cycle: {payrollData.current.cycle}</p>
-          </div>
-          <div className="flex items-center space-x-2 mt-4 sm:mt-0">
-            <button onClick={handleFetchData} disabled={loading} className="p-2 rounded-lg border bg-white hover:bg-gray-50 transition flex items-center justify-center disabled:opacity-50">
-              {loading ? <Loader2 className="animate-spin" size={20} /> : <RefreshCw size={20} />}
-            </button>
-            <button className="px-4 py-2 rounded-lg border bg-white hover:bg-gray-50 transition flex items-center space-x-2">
-              <Download size={16} />
-              <span>Export CSV</span>
-            </button>
-          </div>
-        </header>
-
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
-          <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
-            <div className="flex items-center text-gray-500 mb-2">
-              <DollarSign size={16} className="mr-2" />
-              <span>Total Payroll Cost</span>
-            </div>
-            <p className="text-3xl font-bold text-gray-800">${formatCurrency(payrollData.current.totalCost)}</p>
-            {totalCostDiff && payrollData.previous && (
-              <div className={`flex items-center mt-2 text-sm ${totalCostDiff.diff >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-                {totalCostDiff.diff >= 0 ? <TrendingUp size={16} className="mr-1" /> : <TrendingDown size={16} className="mr-1" />}
-                <span>{totalCostDiff.diff >= 0 ? '+' : ''}${formatCurrency(totalCostDiff.diff)} ({totalCostDiff.percentChange}%) vs last cycle</span>
-              </div>
-            )}
-          </div>
-          <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
-            <div className="flex items-center text-gray-500 mb-2">
-              <Users size={16} className="mr-2" />
-              <span>Employees Paid</span>
-            </div>
-            <p className="text-3xl font-bold text-gray-800">{payrollData.current.employeeCount}</p>
-            {employeeCountDiff && payrollData.previous && (
-              <div className={`flex items-center mt-2 text-sm ${employeeCountDiff.diff >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-                {employeeCountDiff.diff >= 0 ? <TrendingUp size={16} className="mr-1" /> : <TrendingDown size={16} className="mr-1" />}
-                <span>{employeeCountDiff.diff >= 0 ? '+' : ''}{employeeCountDiff.diff.toFixed(0)} employees ({employeeCountDiff.percentChange}%) vs last cycle</span>
-              </div>
-            )}
-          </div>
-          <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
-            <div className="flex items-center text-gray-500 mb-2">
-              <DollarSign size={16} className="mr-2" />
-              <span>Previous Cycle Cost</span>
-            </div>
-            <p className="text-3xl font-bold text-gray-500">
-              {payrollData.previous ? `$${formatCurrency(payrollData.previous.totalCost)}` : 'N/A'}
-            </p>
-            <p className="text-sm text-gray-400 mt-2">{payrollData.previous ? payrollData.previous.cycle : 'No previous cycle data'}</p>
-          </div>
-        </div>
-
-        <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
-          <div className="p-6">
-            <h3 className="text-xl font-semibold text-gray-800">Employee Payments</h3>
-            <p className="text-gray-500 mt-1">Detailed breakdown of payments for the current cycle.</p>
-          </div>
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm text-left text-gray-500">
-              <thead className="bg-gray-50 text-xs text-gray-700 uppercase">
-                <tr>
-                  <th scope="col" className="px-6 py-3">Employee</th>
-                  <th scope="col" className="px-6 py-3">Country</th>
-                  <th scope="col" className="px-6 py-3 text-right">Net Payment</th>
-                  <th scope="col" className="px-6 py-3 text-right">Previous Net</th>
-                  <th scope="col" className="px-6 py-3 text-right">Change</th>
-                  <th scope="col" className="px-6 py-3 text-center">Status</th>
-                </tr>
-              </thead>
-              <tbody>
-                {payrollData.current.employees.map(emp => {
-                  const prevEmp = payrollData.previous?.employees.find(p => p.name === emp.name);
-                  const prevNet = prevEmp?.net;
-                  const change = prevNet !== undefined ? emp.net - prevNet : emp.net;
-
-                  return (
-                    <tr key={emp.id} className="bg-white border-b hover:bg-gray-50">
-                      <th scope="row" className="px-6 py-4 font-medium text-gray-900 whitespace-nowrap">{emp.name}</th>
-                      <td className="px-6 py-4">{emp.country}</td>
-                      <td className="px-6 py-4 text-right font-semibold text-gray-800">${formatCurrency(emp.net)}</td>
-                      <td className="px-6 py-4 text-right">{prevNet !== undefined ? `$${formatCurrency(prevNet)}` : '-'}</td>
-                      <td className="px-6 py-4 text-right">
-                        {prevNet !== undefined ? (
-                          change !== 0 ? (
-                            <span className={`font-semibold ${change > 0 ? 'text-green-600' : 'text-red-600'}`}>
-                              {change > 0 ? '+' : ''}${formatCurrency(change)}
-                            </span>
-                          ) : <span className="text-gray-500">$0.00</span>
-                        ) : <span className="text-green-600">New</span>}
-                      </td>
-                      <td className="px-6 py-4 text-center">
-                        <span className={`px-3 py-1 rounded-full text-xs font-semibold ${
-                          emp.status === 'Paid' || emp.status === 'Completed' ? 'bg-green-100 text-green-800' : 'bg-yellow-100 text-yellow-800'
-                        }`}>{emp.status}</span>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      </div>
-    )
-  );
-
-  return (
-    <div className="bg-gray-50 min-h-screen font-sans">
-      <div className="container mx-auto p-4 sm:p-6 lg:p-8">
-        {!isAuthenticated ? renderAuthScreen() : renderDashboard()}
-      </div>
-    </div>
-  );
+    return Array.from(cyclesMap.values()).sort((a, b) => b.cycleId.localeCompare(a.cycleId));
 };
 
+
+// --- React Component ---
+const DeelPayrollApp: React.FC = () => {
+    const [apiKey, setApiKey] = useState<string>('');
+    const [isAuthenticated, setIsAuthenticated] = useState<boolean>(false);
+    const [loading, setLoading] = useState<boolean>(false);
+    const [error, setError] = useState<string>('');
+    const [payrollData, setPayrollData] = useState<PayrollData | null>(null);
+    const [selectedType, setSelectedType] = useState<EmployeeType | 'All'>('All');
+    const [currentCycleIndex, setCurrentCycleIndex] = useState(0);
+
+    const handleFetchData = async () => {
+        if (!apiKey) {
+            setError('Please enter your Deel API Key.');
+            return;
+        }
+        setLoading(true);
+        setError('');
+        try {
+            const cycles = await fetchAllPayrollData(apiKey);
+            setPayrollData({ cycles });
+            setIsAuthenticated(true);
+            setCurrentCycleIndex(0);
+        } catch (err: any) {
+            setError(err.message || 'An unknown error occurred.');
+            setIsAuthenticated(false);
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    const filteredCycles = useMemo(() => {
+        if (!payrollData) return null;
+        return payrollData.cycles.map(cycle => {
+            if (selectedType === 'All') return cycle;
+            const filteredEmployees = cycle.employees.filter(e => e.type === selectedType);
+            return {
+                ...cycle,
+                employees: filteredEmployees,
+                employeeCount: filteredEmployees.length,
+                totalCost: filteredEmployees.reduce((sum, e) => sum + e.net, 0),
+            };
+        });
+    }, [payrollData, selectedType]);
+
+    const currentCycle = filteredCycles ? filteredCycles[currentCycleIndex] : null;
+    const previousCycle = filteredCycles && currentCycleIndex + 1 < filteredCycles.length ? filteredCycles[currentCycleIndex + 1] : null;
+
+    const calculateDifference = (current: number, previous: number | undefined): DifferenceCalculation => {
+        if (previous === undefined || previous === 0) return { diff: current, percentChange: current > 0 ? '100.00' : '0.00' };
+        const diff = current - previous;
+        const percentChange = ((diff / previous) * 100).toFixed(2);
+        return { diff, percentChange };
+    };
+
+    const totalCostDiff = currentCycle ? calculateDifference(currentCycle.totalCost, previousCycle?.totalCost) : null;
+    const employeeCountDiff = currentCycle ? calculateDifference(currentCycle.employeeCount, previousCycle?.employeeCount) : null;
+    const formatCurrency = (value: number) => value.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    
+    // --- Render Methods ---
+    const renderAuthScreen = () => (
+      <div className="w-full max-w-md mx-auto bg-white p-8 rounded-2xl shadow-lg border border-gray-100">
+        <h2 className="text-2xl font-bold text-center text-gray-800 mb-2">Connect to Deel</h2>
+        <p className="text-center text-gray-500 mb-6">Enter API key for payroll comparison.</p>
+        <div className="space-y-4">
+          <input
+            type="password"
+            value={apiKey}
+            onChange={(e) => setApiKey(e.target.value)}
+            placeholder="Enter your Deel API Key"
+            className="w-full px-4 py-3 rounded-lg border border-gray-300 focus:outline-none focus:ring-2 focus:ring-blue-500"
+          />
+          <button
+            onClick={handleFetchData}
+            disabled={loading}
+            className="w-full bg-blue-600 text-white font-semibold py-3 px-4 rounded-lg hover:bg-blue-700 flex items-center justify-center disabled:bg-blue-300"
+          >
+            {loading ? <><Loader2 className="animate-spin mr-2" size={20} />Connecting...</> : 'Connect & View Payroll'}
+          </button>
+        </div>
+        {error && <div className="mt-4 text-center text-sm text-red-600 bg-red-50 p-3 rounded-lg flex items-center justify-center"><AlertCircle size={16} className="mr-2" />{error}</div>}
+        <p className="text-xs text-gray-400 mt-4 text-center">API key is not stored and used for this session only.</p>
+      </div>
+    );
+    
+    const renderDashboard = () => {
+        if (!currentCycle) return <div className="text-center text-gray-500">No data available for the selected filters.</div>;
+
+        return (
+          <div className="w-full">
+            <header className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-6">
+                <div>
+                    <h1 className="text-3xl font-bold text-gray-800">Payroll Comparison</h1>
+                    <div className="flex items-center space-x-2 mt-2">
+                        <select
+                            value={currentCycleIndex}
+                            onChange={e => setCurrentCycleIndex(Number(e.target.value))}
+                            className="p-2 rounded-lg border bg-white hover:bg-gray-50 text-gray-600 font-semibold"
+                        >
+                            {payrollData?.cycles.map((c, index) => <option key={c.cycleId} value={index}>{c.cycleLabel}</option>)}
+                        </select>
+                        <span className="text-gray-500">vs {previousCycle?.cycleLabel || 'N/A'}</span>
+                    </div>
+                </div>
+                <div className="flex items-center space-x-2 mt-4 sm:mt-0">
+                    <select
+                        value={selectedType}
+                        onChange={(e) => setSelectedType(e.target.value as any)}
+                        className="p-2 rounded-lg border bg-white hover:bg-gray-50 font-semibold"
+                    >
+                        <option value="All">All Workers</option>
+                        <option value="EOR">EOR Employees</option>
+                        <option value="Contractor">Contractors</option>
+                        {/* <option value="PEO">PEO Employees</option> */}
+                    </select>
+                    <button onClick={handleFetchData} disabled={loading} className="p-2 rounded-lg border bg-white hover:bg-gray-50 disabled:opacity-50">
+                        {loading ? <Loader2 className="animate-spin" size={20} /> : <RefreshCw size={20} />}
+                    </button>
+                </div>
+            </header>
+
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+                <StatCard title="Total Payroll Cost" value={`$${formatCurrency(currentCycle.totalCost)}`} diff={totalCostDiff} />
+                <StatCard title="Workers Paid" value={currentCycle.employeeCount.toString()} diff={employeeCountDiff} isInt={true} />
+                <StatCard title="Previous Cycle Cost" value={previousCycle ? `$${formatCurrency(previousCycle.totalCost)}` : 'N/A'} />
+            </div>
+
+            <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
+                <div className="p-6"><h3 className="text-xl font-semibold text-gray-800">Payment Breakdown</h3></div>
+                <div className="overflow-x-auto">
+                    <table className="w-full text-sm text-left text-gray-500">
+                        <thead className="bg-gray-50 text-xs text-gray-700 uppercase">
+                            <tr>
+                                <th className="px-6 py-3">Worker Name</th>
+                                <th className="px-6 py-3">Type</th>
+                                <th className="px-6 py-3">Country</th>
+                                <th className="px-6 py-3 text-right">Net Payment</th>
+                                <th className="px-6 py-3 text-right">Previous Net</th>
+                                <th className="px-6 py-3 text-right">Change</th>
+                                <th className="px-6 py-3 text-center">Status</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {currentCycle.employees.map(emp => {
+                                const prevEmp = previousCycle?.employees.find(p => p.uniqueId === emp.uniqueId);
+                                const change = emp.net - (prevEmp?.net || 0);
+                                return (
+                                <tr key={emp.id} className="bg-white border-b hover:bg-gray-50">
+                                    <td className="px-6 py-4 font-medium text-gray-900">{emp.name}</td>
+                                    <td className="px-6 py-4"><span className={`px-2 py-1 text-xs rounded-full ${emp.type === 'EOR' ? 'bg-blue-100 text-blue-800' : 'bg-purple-100 text-purple-800'}`}>{emp.type}</span></td>
+                                    <td className="px-6 py-4">{emp.country}</td>
+                                    <td className="px-6 py-4 text-right font-semibold text-gray-800">${formatCurrency(emp.net)}</td>
+                                    <td className="px-6 py-4 text-right">{prevEmp ? `$${formatCurrency(prevEmp.net)}` : '-'}</td>
+                                    <td className="px-6 py-4 text-right">{!prevEmp ? <span className="text-green-600">New</span> : change !== 0 ? <span className={`font-semibold ${change > 0 ? 'text-green-600' : 'text-red-600'}`}>{change > 0 ? '+' : ''}${formatCurrency(change)}</span> : <span>$0.00</span>}</td>
+                                    <td className="px-6 py-4 text-center"><span className="capitalize px-3 py-1 rounded-full text-xs font-semibold bg-gray-100 text-gray-800">{emp.status}</span></td>
+                                </tr>
+                                );
+                            })}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+          </div>
+        )
+    };
+
+    return (
+        <div className="bg-gray-50 min-h-screen font-sans">
+            <div className="container mx-auto p-4 sm:p-6 lg:p-8">
+                {!isAuthenticated ? renderAuthScreen() : renderDashboard()}
+            </div>
+        </div>
+    );
+};
+
+const StatCard: React.FC<{ title: string; value: string; diff?: DifferenceCalculation | null, isInt?: boolean }> = ({ title, value, diff, isInt }) => (
+    <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
+        <div className="flex items-center text-gray-500 mb-2">
+            {title.includes("Cost") ? <DollarSign size={16} className="mr-2" /> : <Users size={16} className="mr-2" />}
+            <span>{title}</span>
+        </div>
+        <p className="text-3xl font-bold text-gray-800">{value}</p>
+        {diff && (
+            <div className={`flex items-center mt-2 text-sm ${diff.diff >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                {diff.diff >= 0 ? <TrendingUp size={16} className="mr-1" /> : <TrendingDown size={16} className="mr-1" />}
+                <span>{diff.diff >= 0 ? '+' : ''}{isInt ? diff.diff.toFixed(0) : `$${diff.diff.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`} ({diff.percentChange}%) vs last cycle</span>
+            </div>
+        )}
+    </div>
+);
+
 export default DeelPayrollApp;
+
