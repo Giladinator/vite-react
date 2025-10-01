@@ -6,14 +6,14 @@ import { callDeelApi } from './services/deelApiService';
 interface DeelContract {
   id: string;
   name: string;
-  job_title: string;
+  job_title_name: string; // Corrected field name
   status: string;
   contract_type: 'eor' | 'peo' | 'ongoing_time_based' | 'pay_as_you_go_time_based' | 'milestones' | 'fixed_rate';
   compensation_details: {
     amount: number;
     currency: string;
   };
-  worker: {
+  worker?: { // Worker can be optional
     full_name: string;
   }
 }
@@ -71,13 +71,13 @@ const DeelPayrollApp: React.FC = () => {
         if (activeTab === 'EOR') return c.contract_type === 'eor';
         if (activeTab === 'PEO') return c.contract_type === 'peo';
         if (activeTab === 'Contractor') return ['ongoing_time_based', 'pay_as_you_go_time_based', 'milestones', 'fixed_rate'].includes(c.contract_type);
-        return true;
+        return false; // Return false for unknown types
     });
 
     const employees: Employee[] = filteredContracts.map(c => ({
       id: c.id,
-      name: c.worker?.full_name || c.name,
-      role: c.job_title,
+      name: c.worker?.full_name || c.name, // Fallback to name if worker is not present
+      role: c.job_title_name || 'N/A', // Use correct field and provide fallback
       status: c.status,
       net: c.compensation_details?.amount || 0,
       currency: c.compensation_details?.currency || 'USD',
@@ -209,7 +209,7 @@ const DeelPayrollApp: React.FC = () => {
                   <td className="px-6 py-4 text-right font-semibold text-gray-800">{formatCurrency(emp.net, emp.currency)}</td>
                   <td className="px-6 py-4 text-center">
                     <span className={`px-3 py-1 rounded-full text-xs font-semibold ${
-                      emp.status === 'active' ? 'bg-green-100 text-green-800' : 'bg-yellow-100 text-yellow-800'
+                      emp.status === 'in_progress' || emp.status === 'active' ? 'bg-green-100 text-green-800' : 'bg-yellow-100 text-yellow-800'
                     }`}>{emp.status}</span>
                   </td>
                 </tr>
