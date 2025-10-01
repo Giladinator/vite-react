@@ -16,7 +16,6 @@ interface Payment {
   id: string;
   contract_id: string;
   amount: string;
-  // Add other relevant payment fields if needed
 }
 
 // --- Type Definitions for Application State ---
@@ -31,14 +30,16 @@ interface EmployeePayment {
 }
 
 interface DashboardData {
-    current: {
+    period1: {
         totalCost: number;
         count: number;
         payments: EmployeePayment[];
+        label: string;
     };
-    previous: {
+    period2: {
         totalCost: number;
         count: number;
+        label: string;
     };
     costDiff: DifferenceCalculation | null;
     countDiff: DifferenceCalculation | null;
@@ -49,6 +50,16 @@ interface DifferenceCalculation {
   percentChange: string;
 }
 
+const months = [
+    { value: 0, name: 'January' }, { value: 1, name: 'February' }, { value: 2, name: 'March' },
+    { value: 3, name: 'April' }, { value: 4, name: 'May' }, { value: 5, name: 'June' },
+    { value: 6, name: 'July' }, { value: 7, name: 'August' }, { value: 8, name: 'September' },
+    { value: 9, name: 'October' }, { value: 10, name: 'November' }, { value: 11, name: 'December' }
+];
+
+const currentYear = new Date().getFullYear();
+const years = Array.from({ length: 5 }, (_, i) => currentYear - i);
+
 const DeelPayrollApp: React.FC = () => {
   const [apiKey, setApiKey] = useState<string>('');
   const [isAuthenticated, setIsAuthenticated] = useState<boolean>(false);
@@ -56,11 +67,17 @@ const DeelPayrollApp: React.FC = () => {
   const [error, setError] = useState<string>('');
   
   const [allContracts, setAllContracts] = useState<DeelContract[]>([]);
-  const [currentMonthPayments, setCurrentMonthPayments] = useState<Payment[]>([]);
-  const [previousMonthPayments, setPreviousMonthPayments] = useState<Payment[]>([]);
+  const [period1Payments, setPeriod1Payments] = useState<Payment[]>([]);
+  const [period2Payments, setPeriod2Payments] = useState<Payment[]>([]);
   const [activeTab, setActiveTab] = useState<ViewType>('EOR');
+  
+  // State for user-selected dates
+  const [year1, setYear1] = useState(currentYear);
+  const [month1, setMonth1] = useState(new Date().getMonth());
+  const [year2, setYear2] = useState(new Date(new Date().setMonth(new Date().getMonth() - 1)).getFullYear());
+  const [month2, setMonth2] = useState(new Date(new Date().setMonth(new Date().getMonth() - 1)).getMonth());
 
-  const fetchAllPaginatedData = async (baseUrl: string, params: Record<string, string>): Promise<Payment[]> => {
+  const fetchAllPaginatedData = async (params: Record<string, string>): Promise<Payment[]> => {
     let allData: Payment[] = [];
     let offset = 0;
     const limit = 50;
@@ -68,16 +85,13 @@ const DeelPayrollApp: React.FC = () => {
 
     while(hasMore) {
         const queryParams = new URLSearchParams(params);
-        const url = `${baseUrl}?limit=${limit}&offset=${offset}&${queryParams.toString()}`;
-        
+        const url = `/reports/detailed-payments?limit=${limit}&offset=${offset}&${queryParams.toString()}`;
         const pageData = await callDeelApi<Payment[]>(url, apiKey);
         
         if (pageData && pageData.length > 0) {
             allData = [...allData, ...pageData];
             offset += pageData.length;
-            if (pageData.length < limit) {
-                hasMore = false;
-            }
+            if (pageData.length < limit) hasMore = false;
         } else {
             hasMore = false;
         }
@@ -97,20 +111,19 @@ const DeelPayrollApp: React.FC = () => {
         const contracts = await callDeelApi<DeelContract[]>('/contracts', apiKey);
         setAllContracts(contracts || []);
 
-        // Corrected date formatting to full ISO 8601 timestamp
-        const today = new Date();
-        const currentMonthStart = new Date(today.getFullYear(), today.getMonth(), 1).toISOString();
-        const lastMonthStart = new Date(today.getFullYear(), today.getMonth() - 1, 1).toISOString();
-        const lastMonthEnd = new Date(today.getFullYear(), today.getMonth(), 0, 23, 59, 59, 999).toISOString();
+        // Use selected dates to create ranges
+        const period1Start = new Date(year1, month1, 1).toISOString();
+        const period1End = new Date(year1, month1 + 1, 0, 23, 59, 59, 999).toISOString();
+        const period2Start = new Date(year2, month2, 1).toISOString();
+        const period2End = new Date(year2, month2 + 1, 0, 23, 59, 59, 999).toISOString();
 
-        // Corrected parameter names to from_date and to_date
-        const [currentPayments, previousPayments] = await Promise.all([
-            fetchAllPaginatedData('/reports/detailed-payments', { from_date: currentMonthStart }),
-            fetchAllPaginatedData('/reports/detailed-payments', { from_date: lastMonthStart, to_date: lastMonthEnd })
+        const [p1Payments, p2Payments] = await Promise.all([
+            fetchAllPaginatedData({ from_date: period1Start, to_date: period1End }),
+            fetchAllPaginatedData({ from_date: period2Start, to_date: period2End })
         ]);
         
-        setCurrentMonthPayments(currentPayments);
-        setPreviousMonthPayments(previousPayments);
+        setPeriod1Payments(p1Payments);
+        setPeriod2Payments(p2Payments);
 
         setIsAuthenticated(true);
     } catch (err: any) {
@@ -135,7 +148,7 @@ const DeelPayrollApp: React.FC = () => {
   const processDashboardData = (contracts: DeelContract[]): DashboardData => {
     const contractIds = new Set(contracts.map(c => c.id));
 
-    const processPayments = (payments: Payment[]) => {
+    const processPayments = (payments: Payment[], year: number, month: number) => {
         const filteredPayments = payments.filter(p => contractIds.has(p.contract_id));
         const totalCost = filteredPayments.reduce((acc, p) => acc + parseFloat(p.amount), 0);
         
@@ -155,28 +168,34 @@ const DeelPayrollApp: React.FC = () => {
             }
         });
         
-        return { totalCost, count: employeePayments.length, payments: employeePayments };
+        return { 
+            totalCost, 
+            count: employeePayments.length, 
+            payments: employeePayments,
+            label: `${months[month].name} ${year}`
+        };
     };
 
-    const current = processPayments(currentMonthPayments);
-    const previous = processPayments(previousMonthPayments);
+    const period1 = processPayments(period1Payments, year1, month1);
+    const period2 = processPayments(period2Payments, year2, month2);
 
     return {
-        current,
-        previous: { totalCost: previous.totalCost, count: previous.count },
-        costDiff: calculateDifference(current.totalCost, previous.totalCost),
-        countDiff: calculateDifference(current.count, previous.count),
+        period1,
+        period2: { totalCost: period2.totalCost, count: period2.count, label: period2.label },
+        costDiff: calculateDifference(period1.totalCost, period2.totalCost),
+        countDiff: calculateDifference(period1.count, period2.count),
     };
   };
 
-  const eorData = useMemo(() => processDashboardData(allContracts.filter(c => c.contract_type === 'eor')), [allContracts, currentMonthPayments, previousMonthPayments]);
-  const peoData = useMemo(() => processDashboardData(allContracts.filter(c => c.contract_type === 'peo')), [allContracts, currentMonthPayments, previousMonthPayments]);
-  const contractorData = useMemo(() => processDashboardData(allContracts.filter(c => ['ongoing_time_based', 'pay_as_you_go_time_based', 'milestones', 'fixed_rate'].includes(c.contract_type))), [allContracts, currentMonthPayments, previousMonthPayments]);
+  const eorData = useMemo(() => processDashboardData(allContracts.filter(c => c.contract_type === 'eor')), [allContracts, period1Payments, period2Payments, year1, month1, year2, month2]);
+  const peoData = useMemo(() => processDashboardData(allContracts.filter(c => c.contract_type === 'peo')), [allContracts, period1Payments, period2Payments, year1, month1, year2, month2]);
+  const contractorData = useMemo(() => processDashboardData(allContracts.filter(c => ['ongoing_time_based', 'pay_as_you_go_time_based', 'milestones', 'fixed_rate'].includes(c.contract_type))), [allContracts, period1Payments, period2Payments, year1, month1, year2, month2]);
 
   const renderAuthScreen = () => (
     <div className="w-full max-w-md mx-auto bg-white p-8 rounded-2xl shadow-lg border border-gray-100">
       <h2 className="text-2xl font-bold text-center text-gray-800 mb-2">Connect to Deel</h2>
-      <p className="text-center text-gray-500 mb-6">Enter your API key to view your dashboard.</p>
+      <p className="text-center text-gray-500 mb-6">Enter your API key and select two periods to compare.</p>
+      
       <div className="space-y-4">
         <input
           type="password"
@@ -185,6 +204,32 @@ const DeelPayrollApp: React.FC = () => {
           placeholder="Enter your Deel API Key"
           className="w-full px-4 py-3 rounded-lg border border-gray-300 focus:outline-none focus:ring-2 focus:ring-blue-500 transition"
         />
+
+        {/* --- Date Selection UI --- */}
+        <fieldset className="border border-gray-200 p-4 rounded-lg">
+            <legend className="text-sm font-medium text-gray-600 px-1">Primary Period</legend>
+            <div className="flex space-x-2">
+                <select value={month1} onChange={(e) => setMonth1(Number(e.target.value))} className="w-full px-4 py-3 rounded-lg border border-gray-300">
+                    {months.map(m => <option key={m.value} value={m.value}>{m.name}</option>)}
+                </select>
+                <select value={year1} onChange={(e) => setYear1(Number(e.target.value))} className="w-full px-4 py-3 rounded-lg border border-gray-300">
+                    {years.map(y => <option key={y} value={y}>{y}</option>)}
+                </select>
+            </div>
+        </fieldset>
+        
+        <fieldset className="border border-gray-200 p-4 rounded-lg">
+            <legend className="text-sm font-medium text-gray-600 px-1">Comparison Period</legend>
+             <div className="flex space-x-2">
+                <select value={month2} onChange={(e) => setMonth2(Number(e.target.value))} className="w-full px-4 py-3 rounded-lg border border-gray-300">
+                    {months.map(m => <option key={m.value} value={m.value}>{m.name}</option>)}
+                </select>
+                <select value={year2} onChange={(e) => setYear2(Number(e.target.value))} className="w-full px-4 py-3 rounded-lg border border-gray-300">
+                    {years.map(y => <option key={y} value={y}>{y}</option>)}
+                </select>
+            </div>
+        </fieldset>
+
         <button
           onClick={handleFetchData}
           disabled={loading}
@@ -199,36 +244,35 @@ const DeelPayrollApp: React.FC = () => {
   );
   
   const renderDataView = (data: DashboardData, title: ViewType) => {
-    if (data.current.count === 0 && !loading) return <div className="text-center text-gray-500 p-8">No current payment data found for {title}.</div>;
+    if (data.period1.count === 0 && !loading) return <div className="text-center text-gray-500 p-8">No payment data found for {data.period1.label} in {title}.</div>;
 
     return (
         <>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
                 <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
-                    <div className="flex items-center text-gray-500 mb-2"><DollarSign size={16} className="mr-2" /><span>Total Cost ({title})</span></div>
-                    <p className="text-3xl font-bold text-gray-800">{formatCurrency(data.current.totalCost)}</p>
+                    <div className="flex items-center text-gray-500 mb-2"><DollarSign size={16} className="mr-2" /><span>Total Cost ({data.period1.label})</span></div>
+                    <p className="text-3xl font-bold text-gray-800">{formatCurrency(data.period1.totalCost)}</p>
                     {data.costDiff && (
                          <div className={`flex items-center mt-2 text-sm ${data.costDiff.diff >= 0 ? 'text-green-600' : 'text-red-600'}`}>
                             {data.costDiff.diff >= 0 ? <TrendingUp size={16} className="mr-1" /> : <TrendingDown size={16} className="mr-1" />}
-                            <span>{data.costDiff.diff >= 0 ? '+' : ''}{formatCurrency(data.costDiff.diff)} ({data.costDiff.percentChange}%) vs last month</span>
+                            <span>{data.costDiff.diff >= 0 ? '+' : ''}{formatCurrency(data.costDiff.diff)} ({data.costDiff.percentChange}%) vs {data.period2.label}</span>
                         </div>
                     )}
                 </div>
                 <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
-                    <div className="flex items-center text-gray-500 mb-2"><Users size={16} className="mr-2" /><span>Workers Paid ({title})</span></div>
-                    <p className="text-3xl font-bold text-gray-800">{data.current.count}</p>
+                    <div className="flex items-center text-gray-500 mb-2"><Users size={16} className="mr-2" /><span>Workers Paid ({data.period1.label})</span></div>
+                    <p className="text-3xl font-bold text-gray-800">{data.period1.count}</p>
                      {data.countDiff && (
                          <div className={`flex items-center mt-2 text-sm ${data.countDiff.diff >= 0 ? 'text-green-600' : 'text-red-600'}`}>
                             {data.countDiff.diff >= 0 ? <TrendingUp size={16} className="mr-1" /> : <TrendingDown size={16} className="mr-1" />}
-                            <span>{data.countDiff.diff >= 0 ? '+' : ''}{data.countDiff.diff.toFixed(0)} workers ({data.countDiff.percentChange}%) vs last month</span>
+                            <span>{data.countDiff.diff >= 0 ? '+' : ''}{data.countDiff.diff.toFixed(0)} workers ({data.countDiff.percentChange}%) vs {data.period2.label}</span>
                         </div>
                     )}
                 </div>
             </div>
             <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
                 <div className="p-6">
-                    <h3 className="text-xl font-semibold text-gray-800">{title} Payment Details</h3>
-                    <p className="text-gray-500 mt-1">Breakdown of payments for the current month.</p>
+                    <h3 className="text-xl font-semibold text-gray-800">{title} Payment Details ({data.period1.label})</h3>
                 </div>
                 <div className="overflow-x-auto">
                     <table className="w-full text-sm text-left text-gray-500">
@@ -241,7 +285,7 @@ const DeelPayrollApp: React.FC = () => {
                             </tr>
                         </thead>
                         <tbody>
-                            {data.current.payments.map(p => (
+                            {data.period1.payments.map(p => (
                                 <tr key={p.contractId} className="bg-white border-b hover:bg-gray-50">
                                     <th scope="row" className="px-6 py-4 font-medium text-gray-900 whitespace-nowrap">{p.name}</th>
                                     <td className="px-6 py-4">{p.role}</td>
