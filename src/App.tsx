@@ -12,6 +12,7 @@ interface DeelContract {
   worker?: { full_name: string; };
 }
 
+// Corrected to match the provided JSON structure
 interface PaymentResponse {
   line_item: {
     amount: string;
@@ -151,61 +152,66 @@ const DeelPayrollApp: React.FC = () => {
     return { diff, percentChange };
   };
 
+  // Rewritten data processing logic
   const { eorData, peoData, contractorData } = useMemo(() => {
     const processDashboardData = (contracts: DeelContract[]): DashboardData => {
-        const contractIds = new Set(contracts.map(c => c.id));
-  
-        const processPayments = (payments: PaymentResponse[], year: number, month: number) => {
-            const filteredPayments = payments.filter(p => contractIds.has(p.contract.id));
-            const totalCost = filteredPayments.reduce((acc, p) => acc + parseFloat(p.line_item.amount.replace(/,/g, '')), 0);
-            
-            const paymentsByContract = filteredPayments.reduce((acc, p) => {
-                const amount = parseFloat(p.line_item.amount.replace(/,/g, ''));
+      const contractIds = new Set(contracts.map(c => c.id));
+
+      const processPayments = (payments: PaymentResponse[], year: number, month: number) => {
+          // Correctly filter payments based on the contract ID from the nested object
+          const filteredPayments = payments.filter(p => contractIds.has(p.contract.id));
+          
+          const totalCost = filteredPayments.reduce((acc, p) => {
+              // Remove commas before parsing the amount
+              const amount = parseFloat(p.line_item.amount.replace(/,/g, ''));
+              return acc + (isNaN(amount) ? 0 : amount);
+          }, 0);
+          
+          const paymentsByContract = filteredPayments.reduce((acc, p) => {
+              const amount = parseFloat(p.line_item.amount.replace(/,/g, ''));
+              if (!isNaN(amount)) {
+                // Use correct contract ID from the nested object
                 acc[p.contract.id] = (acc[p.contract.id] || 0) + amount;
-                return acc;
-            }, {} as Record<string, number>);
-  
-            const employeePayments: EmployeePayment[] = Object.keys(paymentsByContract).map(contractId => {
-                const contract = contracts.find(c => c.id === contractId);
-                return {
-                    contractId: contractId,
-                    name: contract?.worker?.full_name || contract?.name || 'N/A',
-                    role: contract?.job_title_name || 'N/A',
-                    status: contract?.status || 'active',
-                    amount: paymentsByContract[contractId]
-                }
-            });
-            
-            return { 
-                totalCost, 
-                count: employeePayments.length, 
-                payments: employeePayments,
-                label: `${months[month].name} ${year}`
-            };
-        };
-  
-        const period1 = processPayments(period1Payments, year1, month1);
-        const period2 = processPayments(period2Payments, year2, month2);
-  
-        return {
-            period1,
-            period2: { totalCost: period2.totalCost, count: period2.count, label: period2.label },
-            costDiff: calculateDifference(period1.totalCost, period2.totalCost),
-            countDiff: calculateDifference(period1.count, period2.count),
-        };
+              }
+              return acc;
+          }, {} as Record<string, number>);
+
+          const employeePayments: EmployeePayment[] = Object.keys(paymentsByContract).map(contractId => {
+              const contract = contracts.find(c => c.id === contractId);
+              return {
+                  contractId: contractId,
+                  name: contract?.worker?.full_name || contract?.name || 'N/A',
+                  role: contract?.job_title_name || 'N/A',
+                  status: contract?.status || 'active',
+                  amount: paymentsByContract[contractId]
+              }
+          });
+          
+          return { 
+              totalCost, 
+              count: employeePayments.length, 
+              payments: employeePayments,
+              label: `${months[month].name} ${year}`
+          };
       };
 
-      const eorContracts = allContracts.filter(c => c.contract_type === 'eor');
-      const peoContracts = allContracts.filter(c => c.contract_type === 'peo');
-      const contractorContracts = allContracts.filter(c => ['ongoing_time_based', 'pay_as_you_go_time_based', 'milestones', 'fixed_rate'].includes(c.contract_type));
+      const period1 = processPayments(period1Payments, year1, month1);
+      const period2 = processPayments(period2Payments, year2, month2);
 
       return {
-          eorData: processDashboardData(eorContracts),
-          peoData: processDashboardData(peoContracts),
-          contractorData: processDashboardData(contractorContracts),
-      }
-  }, [allContracts, period1Payments, period2Payments, year1, month1, year2, month2]);
+          period1,
+          period2: { totalCost: period2.totalCost, count: period2.count, label: period2.label },
+          costDiff: calculateDifference(period1.totalCost, period2.totalCost),
+          countDiff: calculateDifference(period1.count, period2.count),
+      };
+    };
 
+    return {
+        eorData: processDashboardData(allContracts.filter(c => c.contract_type === 'eor')),
+        peoData: processDashboardData(allContracts.filter(c => c.contract_type === 'peo')),
+        contractorData: processDashboardData(allContracts.filter(c => ['ongoing_time_based', 'pay_as_you_go_time_based', 'milestones', 'fixed_rate'].includes(c.contract_type)))
+    };
+  }, [allContracts, period1Payments, period2Payments, year1, month1, year2, month2]);
 
   const renderAuthScreen = () => (
     <div className="w-full max-w-md mx-auto bg-white p-8 rounded-2xl shadow-lg border border-gray-100">
