@@ -1,5 +1,4 @@
-import React, 'react';
-import { useMemo, useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { AlertCircle, Download, DollarSign, Loader2, RefreshCw, Users, TrendingUp, TrendingDown } from 'lucide-react';
 import { callDeelApi } from './services/deelApiService';
 
