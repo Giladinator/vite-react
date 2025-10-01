@@ -25,7 +25,7 @@ interface Employee {
   role: string;
   country: string;
   net: number;
-  status: 'Paid' | 'Processing' | 'Pending' | 'Completed'; // Added 'Completed' as a possible status
+  status: 'Paid' | 'Processing' | 'Pending' | 'Completed';
 }
 
 interface PayrollCycle {
@@ -37,14 +37,13 @@ interface PayrollCycle {
 
 interface PayrollData {
   current: PayrollCycle;
-  previous: PayrollCycle | null; // Previous can be null if it's the first cycle
+  previous: PayrollCycle | null;
 }
 
 interface DifferenceCalculation {
   diff: number;
   percentChange: string;
 }
-
 
 // --- API Helper ---
 const callDeelApi = async <T>(endpoint: string, apiKey: string): Promise<T> => {
@@ -80,7 +79,6 @@ const DeelPayrollApp: React.FC = () => {
     setPayrollData(null);
 
     try {
-      // 1. Fetch all payroll reports (cycles)
       const reports = await callDeelApi<DeelPayrollReport[]>('/gp/reports', apiKey);
       if (!reports || reports.length === 0) {
         setError('No payroll reports found for this API key.');
@@ -88,25 +86,25 @@ const DeelPayrollApp: React.FC = () => {
         return;
       }
       
-      // Assume reports are sorted newest to oldest
       const currentReport = reports[0];
       const previousReport = reports.length > 1 ? reports[1] : null;
 
-      // 2. Fetch payslips for the current and previous cycles concurrently
       const payslipPromises = [
         callDeelApi<DeelPayslip[]>(`/gp/reports/${currentReport.id}/payslips`, apiKey),
       ];
 
       if (previousReport) {
         payslipPromises.push(callDeelApi<DeelPayslip[]>(`/gp/reports/${previousReport.id}/payslips`, apiKey));
+      } else {
+        payslipPromises.push(Promise.resolve([])); // Add empty promise if no previous report
       }
 
       const [currentPayslips, previousPayslips] = await Promise.all(payslipPromises);
       
-      // 3. Transform API data into the format the app uses
       const formatCycle = (report: DeelPayrollReport, payslips: DeelPayslip[]): PayrollCycle => {
-        const month = new Date(report.start_date).toLocaleString('default', { month: 'long' });
-        const year = new Date(report.start_date).getFullYear();
+        const date = new Date(report.start_date + 'T00:00:00Z'); // Assume UTC to avoid timezone issues
+        const month = date.toLocaleString('default', { month: 'long', timeZone: 'UTC' });
+        const year = date.getUTCFullYear();
         
         return {
           cycle: `${month} ${year}`,
@@ -115,10 +113,10 @@ const DeelPayrollApp: React.FC = () => {
           employees: payslips.map(p => ({
             id: p.id,
             name: p.employee_name,
-            role: 'N/A', // Role is not available in this API endpoint
+            role: 'N/A',
             country: p.country,
             net: parseFloat(p.net_pay),
-            status: p.status.charAt(0).toUpperCase() + p.status.slice(1) as Employee['status'],
+            status: (p.status.charAt(0).toUpperCase() + p.status.slice(1)) as Employee['status'],
           })),
         };
       };
@@ -138,9 +136,8 @@ const DeelPayrollApp: React.FC = () => {
     }
   };
 
-
   const calculateDifference = (current: number, previous: number | undefined): DifferenceCalculation => {
-    if (previous === undefined || previous === 0) return { diff: 0, percentChange: '0.00' };
+    if (previous === undefined || previous === 0) return { diff: current, percentChange: '100.00' };
     const diff = current - previous;
     const percentChange = ((diff / previous) * 100).toFixed(2);
     return { diff, percentChange };
@@ -148,6 +145,8 @@ const DeelPayrollApp: React.FC = () => {
 
   const totalCostDiff = payrollData ? calculateDifference(payrollData.current.totalCost, payrollData.previous?.totalCost) : null;
   const employeeCountDiff = payrollData ? calculateDifference(payrollData.current.employeeCount, payrollData.previous?.employeeCount) : null;
+  
+  const formatCurrency = (value: number) => value.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
   const renderAuthScreen = () => (
     <div className="w-full max-w-md mx-auto bg-white p-8 rounded-2xl shadow-lg border border-gray-100">
@@ -205,23 +204,20 @@ const DeelPayrollApp: React.FC = () => {
           </div>
         </header>
 
-        {/* Stat Cards */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
-            {/* Total Payroll Cost */}
             <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
                 <div className="flex items-center text-gray-500 mb-2">
                     <DollarSign size={16} className="mr-2" />
                     <span>Total Payroll Cost</span>
                 </div>
-                <p className="text-3xl font-bold text-gray-800">${payrollData.current.totalCost.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
+                <p className="text-3xl font-bold text-gray-800">${formatCurrency(payrollData.current.totalCost)}</p>
                 {totalCostDiff && payrollData.previous && (
                     <div className={`flex items-center mt-2 text-sm ${totalCostDiff.diff >= 0 ? 'text-green-600' : 'text-red-600'}`}>
                         {totalCostDiff.diff >= 0 ? <TrendingUp size={16} className="mr-1" /> : <TrendingDown size={16} className="mr-1" />}
-                        <span>{totalCostDiff.diff >= 0 ? '+' : ''}${totalCostDiff.diff.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ({totalCostDiff.percentChange}%) vs last cycle</span>
+                        <span>{totalCostDiff.diff >= 0 ? '+' : ''}${formatCurrency(totalCostDiff.diff)} ({totalCostDiff.percentChange}%) vs last cycle</span>
                     </div>
                 )}
             </div>
-            {/* Employee Count */}
             <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
                 <div className="flex items-center text-gray-500 mb-2">
                     <Users size={16} className="mr-2" />
@@ -235,20 +231,18 @@ const DeelPayrollApp: React.FC = () => {
                     </div>
                 )}
             </div>
-             {/* Previous Cycle Cost */}
              <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
                 <div className="flex items-center text-gray-500 mb-2">
                     <DollarSign size={16} className="mr-2" />
                     <span>Previous Cycle Cost</span>
                 </div>
                 <p className="text-3xl font-bold text-gray-500">
-                    {payrollData.previous ? `$${payrollData.previous.totalCost.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : 'N/A'}
+                    {payrollData.previous ? `$${formatCurrency(payrollData.previous.totalCost)}` : 'N/A'}
                 </p>
                 <p className="text-sm text-gray-400 mt-2">{payrollData.previous ? payrollData.previous.cycle : 'No previous cycle data'}</p>
             </div>
         </div>
 
-        {/* Employee Table */}
         <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
             <div className="p-6">
                 <h3 className="text-xl font-semibold text-gray-800">Employee Payments</h3>
@@ -269,21 +263,23 @@ const DeelPayrollApp: React.FC = () => {
                     <tbody>
                         {payrollData.current.employees.map(emp => {
                             const prevEmp = payrollData.previous?.employees.find(p => p.name === emp.name);
-                            const prevNet = prevEmp ? prevEmp.net : 0;
-                            const change = emp.net - prevNet;
+                            const prevNet = prevEmp?.net;
+                            const change = prevNet !== undefined ? emp.net - prevNet : emp.net;
 
                             return (
                                 <tr key={emp.id} className="bg-white border-b hover:bg-gray-50">
                                     <th scope="row" className="px-6 py-4 font-medium text-gray-900 whitespace-nowrap">{emp.name}</th>
-                                    <td className="px-6 py-4 text-gray-600">{emp.country}</td>
-                                    <td className="px-6 py-4 text-right font-semibold text-gray-800">${emp.net.toLocaleString()}</td>
-                                    <td className="px-6 py-4 text-right text-gray-600">{prevNet > 0 ? `$${prevNet.toLocaleString()}` : '-'}</td>
+                                    <td className="px-6 py-4">{emp.country}</td>
+                                    <td className="px-6 py-4 text-right font-semibold text-gray-800">${formatCurrency(emp.net)}</td>
+                                    <td className="px-6 py-4 text-right">{prevNet !== undefined ? `$${formatCurrency(prevNet)}` : '-'}</td>
                                     <td className="px-6 py-4 text-right">
-                                        {change !== 0 && prevNet > 0 && (
-                                            <span className={`font-semibold ${change > 0 ? 'text-green-600' : change < 0 ? 'text-red-600' : 'text-gray-600'}`}>
-                                                {change > 0 ? '+' : ''}${change.toLocaleString()}
-                                            </span>
-                                        )}
+                                        {prevNet !== undefined ? (
+                                            change !== 0 ? (
+                                                <span className={`font-semibold ${change > 0 ? 'text-green-600' : 'text-red-600'}`}>
+                                                    {change > 0 ? '+' : ''}${formatCurrency(change)}
+                                                </span>
+                                            ) : <span className="text-gray-500">$0.00</span>
+                                        ) : <span className="text-green-600">New</span>}
                                     </td>
                                     <td className="px-6 py-4 text-center">
                                         <span className={`px-3 py-1 rounded-full text-xs font-semibold ${
@@ -311,3 +307,4 @@ const DeelPayrollApp: React.FC = () => {
 };
 
 export default DeelPayrollApp;
+
