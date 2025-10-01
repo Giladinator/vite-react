@@ -124,21 +124,10 @@ const DeelPayrollApp: React.FC = () => {
         const period2Start = new Date(year2, month2, 1).toISOString();
         const period2End = new Date(year2, month2 + 1, 0, 23, 59, 59, 999).toISOString();
 
-        // --- CORRECTED API CALL LOGIC ---
-        // For the primary period, check if it's the current month. If so, don't send `to_date`.
-        const isCurrentMonth = year1 === currentYear && month1 === new Date().getMonth();
-        
-        const period1Params = { from_date: period1Start };
-        if (!isCurrentMonth) {
-            // @ts-ignore
-            period1Params.to_date = period1End;
-        }
-        
-        const period2Params = { from_date: period2Start, to_date: period2End };
-
+        // --- CORRECTED: Always send both from_date and to_date ---
         const [p1Payments, p2Payments] = await Promise.all([
-            fetchAllPaginatedData(period1Params),
-            fetchAllPaginatedData(period2Params)
+            fetchAllPaginatedData({ from_date: period1Start, to_date: period1End }),
+            fetchAllPaginatedData({ from_date: period2Start, to_date: period2End })
         ]);
         
         console.log(`--- Payments for ${months[month1].name} ${year1} ---`, p1Payments);
