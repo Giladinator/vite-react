@@ -2,7 +2,7 @@ import axios from 'axios';
 
 // Create a configured instance of axios for the Deel API
 const deelApi = axios.create({
-  baseURL: 'https://api.letsdeel.com/rest/v2', // Production API URL
+  baseURL: 'https://api-sandbox.demo.deel.com/rest/v2', // Production API URL
   headers: {
     'Content-Type': 'application/json',
   },
