@@ -1,8 +1,8 @@
 import React, { useState, useMemo } from 'react';
-import { AlertCircle, Download, RefreshCw, Users, DollarSign, TrendingUp, TrendingDown, Loader2 } from 'lucide-react';
+import { AlertCircle, RefreshCw, Users, DollarSign, TrendingUp, TrendingDown, Loader2 } from 'lucide-react';
 
-// --- Enhanced Type Definitions ---
-type EmployeeType = 'EOR' | 'Contractor' | 'PEO';
+// --- Type Definitions ---
+type EmployeeType = 'EOR' | 'Contractor';
 
 interface Employee {
   id: string;
@@ -10,8 +10,8 @@ interface Employee {
   type: EmployeeType;
   country: string;
   net: number;
-  status: 'paid' | 'processing' | 'pending' | 'completed' | 'overdue' | string;
-  uniqueId: string; // Composite key of name and type
+  status: string;
+  uniqueId: string;
 }
 
 interface PayrollCycle {
@@ -53,7 +53,7 @@ const callDeelApi = async <T>(endpoint: string, apiKey: string, params: Record<s
 const fetchAllPayrollData = async (apiKey: string): Promise<PayrollCycle[]> => {
     const toDate = new Date();
     const fromDate = new Date();
-    fromDate.setMonth(toDate.getMonth() - 2); // Fetch last 3 months for comparison
+    fromDate.setMonth(toDate.getMonth() - 2);
     
     const toDateString = toDate.toISOString().split('T')[0];
     const fromDateString = fromDate.toISOString().split('T')[0];
@@ -70,9 +70,7 @@ const fetchAllPayrollData = async (apiKey: string): Promise<PayrollCycle[]> => {
 
     eorData.forEach(({ report, payslips }) => {
         const date = new Date(report.start_date + 'T00:00:00Z');
-        const year = date.getUTCFullYear();
-        const month = date.getUTCMonth();
-        let cycleId = `${year}-${String(month + 1).padStart(2, '0')}`;
+        let cycleId = `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, '0')}`;
         let cycleLabel = date.toLocaleString('default', { month: 'long', year: 'numeric', timeZone: 'UTC' });
 
         if (payslips.some((p: any) => p.country === 'US')) {
@@ -93,18 +91,13 @@ const fetchAllPayrollData = async (apiKey: string): Promise<PayrollCycle[]> => {
         cycle.totalCost += parseFloat(report.total);
         cycle.employeeCount += report.employees_count;
         payslips.forEach((p: any) => {
-            cycle.employees.push({
-                id: p.id, name: p.employee_name, type: 'EOR', country: p.country,
-                net: parseFloat(p.net_pay), status: p.status.toLowerCase(), uniqueId: `${p.employee_name}-EOR`
-            });
+            cycle.employees.push({ id: p.id, name: p.employee_name, type: 'EOR', country: p.country, net: parseFloat(p.net_pay), status: p.status.toLowerCase(), uniqueId: `${p.employee_name}-EOR` });
         });
     });
 
     (contractorInvoices.data || contractorInvoices).forEach((inv: any) => {
         const date = new Date(inv.paid_at || inv.created_at);
-        const year = date.getFullYear();
-        const month = date.getMonth();
-        const cycleId = `${year}-${String(month + 1).padStart(2, '0')}`;
+        const cycleId = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
         const cycleLabel = date.toLocaleString('default', { month: 'long', year: 'numeric' });
 
         if (!cyclesMap.has(cycleId)) {
@@ -113,10 +106,7 @@ const fetchAllPayrollData = async (apiKey: string): Promise<PayrollCycle[]> => {
         const cycle = cyclesMap.get(cycleId)!;
         cycle.totalCost += parseFloat(inv.total);
         cycle.employeeCount += 1;
-        cycle.employees.push({
-            id: inv.id, name: inv.contract.name, type: 'Contractor', country: inv.contract.client.legal_entity.country,
-            net: parseFloat(inv.total), status: inv.status.toLowerCase(), uniqueId: `${inv.contract.name}-Contractor`
-        });
+        cycle.employees.push({ id: inv.id, name: inv.contract.name, type: 'Contractor', country: inv.contract.client.legal_entity.country, net: parseFloat(inv.total), status: inv.status.toLowerCase(), uniqueId: `${inv.contract.name}-Contractor` });
     });
 
     return Array.from(cyclesMap.values()).sort((a, b) => b.cycleId.localeCompare(a.cycleId));
@@ -134,37 +124,25 @@ const DeelPayrollApp: React.FC = () => {
 
     const handleFetchData = async () => {
         if (!apiKey) { setError('Please enter your Deel API Key.'); return; }
-        setLoading(true);
-        setError('');
+        setLoading(true); setError('');
         try {
           const cycles = await fetchAllPayrollData(apiKey);
           if (cycles.length === 0) {
-            setError('No payroll data found for the recent period.');
-            setPayrollData(null);
+            setError('No payroll data found for the recent period.'); setPayrollData(null);
           } else {
-            setPayrollData({ cycles });
-            setIsAuthenticated(true);
-            setCurrentCycleIndex(0);
+            setPayrollData({ cycles }); setIsAuthenticated(true); setCurrentCycleIndex(0);
           }
         } catch (err: any) {
-          setError(err.message || 'An unknown error occurred.');
-          setIsAuthenticated(false);
-        } finally {
-          setLoading(false);
-        }
-      };
+          setError(err.message || 'An unknown error occurred.'); setIsAuthenticated(false);
+        } finally { setLoading(false); }
+    };
 
     const filteredCycles = useMemo(() => {
         if (!payrollData) return null;
         return payrollData.cycles.map(cycle => {
             if (selectedType === 'All') return cycle;
             const filteredEmployees = cycle.employees.filter(e => e.type === selectedType);
-            return {
-                ...cycle,
-                employees: filteredEmployees,
-                employeeCount: filteredEmployees.length,
-                totalCost: filteredEmployees.reduce((sum, e) => sum + e.net, 0),
-            };
+            return { ...cycle, employees: filteredEmployees, employeeCount: filteredEmployees.length, totalCost: filteredEmployees.reduce((sum, e) => sum + e.net, 0) };
         });
     }, [payrollData, selectedType]);
 
@@ -189,10 +167,10 @@ const DeelPayrollApp: React.FC = () => {
         <div className="space-y-4">
           <input type="password" value={apiKey} onChange={(e) => setApiKey(e.target.value)} placeholder="Enter your Deel API Key" className="w-full px-4 py-3 rounded-lg border border-gray-300 focus:outline-none focus:ring-2 focus:ring-blue-500"/>
           <button onClick={handleFetchData} disabled={loading} className="w-full bg-blue-600 text-white font-semibold py-3 px-4 rounded-lg hover:bg-blue-700 flex items-center justify-center disabled:bg-blue-300">
-            {loading ? <><Loader2 className="animate-spin mr-2" size={20} />Connecting...</> : 'Connect & View Payroll'}
+            {loading ? <><Loader2 className="animate-spin mr-2" size={20} /><span>Connecting...</span></> : <span>Connect & View Payroll</span>}
           </button>
         </div>
-        {error && <div className="mt-4 text-center text-sm text-red-600 bg-red-50 p-3 rounded-lg flex items-center justify-center"><AlertCircle size={16} className="mr-2" />{error}</div>}
+        {error && <div className="mt-4 text-center text-sm text-red-600 bg-red-50 p-3 rounded-lg flex items-center justify-center"><AlertCircle size={16} className="mr-2" /><span>{error}</span></div>}
         <p className="text-xs text-gray-400 mt-4 text-center">API key is not stored and used for this session only.</p>
       </div>
     );
@@ -214,51 +192,44 @@ const DeelPayrollApp: React.FC = () => {
                 </div>
                 <div className="flex items-center space-x-2 mt-4 sm:mt-0">
                     <select value={selectedType} onChange={(e) => setSelectedType(e.target.value as EmployeeType | 'All')} className="p-2 rounded-lg border bg-white hover:bg-gray-50 font-semibold">
-                        <option value="All">All Workers</option>
-                        <option value="EOR">EOR Employees</option>
-                        <option value="Contractor">Contractors</option>
+                        <option value="All">All Workers</option><option value="EOR">EOR Employees</option><option value="Contractor">Contractors</option>
                     </select>
                     <button onClick={handleFetchData} disabled={loading} className="p-2 rounded-lg border bg-white hover:bg-gray-50 disabled:opacity-50">
                         {loading ? <Loader2 className="animate-spin" size={20} /> : <RefreshCw size={20} />}
                     </button>
                 </div>
             </header>
-
             <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
                 <StatCard title="Total Payroll Cost" value={`$${formatCurrency(currentCycle.totalCost)}`} diff={totalCostDiff} />
                 <StatCard title="Workers Paid" value={currentCycle.employeeCount.toString()} diff={employeeCountDiff} isInt={true} />
                 <StatCard title="Previous Cycle Cost" value={previousCycle ? `$${formatCurrency(previousCycle.totalCost)}` : 'N/A'} />
             </div>
-
             <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
                 <div className="p-6"><h3 className="text-xl font-semibold text-gray-800">Payment Breakdown</h3></div>
                 <div className="overflow-x-auto">
-                    <table className="w-full text-sm text-left text-gray-500">
-                        <thead className="bg-gray-50 text-xs text-gray-700 uppercase">
-                            <tr>
-                                <th className="px-6 py-3">Worker Name</th><th className="px-6 py-3">Type</th><th className="px-6 py-3">Country</th>
-                                <th className="px-6 py-3 text-right">Net Payment</th><th className="px-6 py-3 text-right">Previous Net</th>
-                                <th className="px-6 py-3 text-right">Change</th><th className="px-6 py-3 text-center">Status</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            {currentCycle.employees.map(emp => {
-                                const prevEmp = previousCycle?.employees.find(p => p.uniqueId === emp.uniqueId);
-                                const change = emp.net - (prevEmp?.net ?? 0);
-                                return (
-                                <tr key={emp.id} className="bg-white border-b hover:bg-gray-50">
-                                    <td className="px-6 py-4 font-medium text-gray-900">{emp.name}</td>
-                                    <td className="px-6 py-4"><span className={`px-2 py-1 text-xs rounded-full font-semibold ${emp.type === 'EOR' ? 'bg-blue-100 text-blue-800' : 'bg-purple-100 text-purple-800'}`}>{emp.type}</span></td>
-                                    <td className="px-6 py-4">{emp.country}</td>
-                                    <td className="px-6 py-4 text-right font-semibold text-gray-800">${formatCurrency(emp.net)}</td>
-                                    <td className="px-6 py-4 text-right">{prevEmp ? `$${formatCurrency(prevEmp.net)}` : '-'}</td>
-                                    <td className="px-6 py-4 text-right">{!prevEmp ? <span className="text-green-600 font-semibold">New</span> : change !== 0 ? <span className={`font-semibold ${change > 0 ? 'text-green-600' : 'text-red-600'}`}>{change > 0 ? '+' : ''}${formatCurrency(change)}</span> : <span className="text-gray-500">$0.00</span>}</td>
-                                    <td className="px-6 py-4 text-center"><span className="capitalize px-3 py-1 rounded-full text-xs font-semibold bg-gray-100 text-gray-800">{emp.status.replace('_', ' ')}</span></td>
-                                </tr>
-                                );
-                            })}
-                        </tbody>
-                    </table>
+                    <table className="w-full text-sm text-left text-gray-500"><thead className="bg-gray-50 text-xs text-gray-700 uppercase"><tr>
+                        <th className="px-6 py-3">Worker Name</th><th className="px-6 py-3">Type</th><th className="px-6 py-3">Country</th>
+                        <th className="px-6 py-3 text-right">Net Payment</th><th className="px-6 py-3 text-right">Previous Net</th>
+                        <th className="px-6 py-3 text-right">Change</th><th className="px-6 py-3 text-center">Status</th>
+                    </tr></thead><tbody>
+                        {currentCycle.employees.map(emp => {
+                            const prevEmp = previousCycle?.employees.find(p => p.uniqueId === emp.uniqueId);
+                            const change = emp.net - (prevEmp?.net ?? 0);
+                            const changeStr = !prevEmp ? <span className="text-green-600 font-semibold">New</span> : change !== 0 ? <span className={`font-semibold ${change > 0 ? 'text-green-600' : 'text-red-600'}`}>{change > 0 ? '+' : ''}${formatCurrency(change)}</span> : <span className="text-gray-500">$0.00</span>;
+                            const typeClassName = `px-2 py-1 text-xs rounded-full font-semibold ${emp.type === 'EOR' ? 'bg-blue-100 text-blue-800' : 'bg-purple-100 text-purple-800'}`;
+
+                            return (
+                            <tr key={emp.id} className="bg-white border-b hover:bg-gray-50">
+                                <td className="px-6 py-4 font-medium text-gray-900">{emp.name}</td>
+                                <td className="px-6 py-4"><span className={typeClassName}>{emp.type}</span></td>
+                                <td className="px-6 py-4">{emp.country}</td>
+                                <td className="px-6 py-4 text-right font-semibold text-gray-800">${formatCurrency(emp.net)}</td>
+                                <td className="px-6 py-4 text-right">{prevEmp ? `$${formatCurrency(prevEmp.net)}` : '-'}</td>
+                                <td className="px-6 py-4 text-right">{changeStr}</td>
+                                <td className="px-6 py-4 text-center"><span className="capitalize px-3 py-1 rounded-full text-xs font-semibold bg-gray-100 text-gray-800">{emp.status.replace('_', ' ')}</span></td>
+                            </tr>);
+                        })}
+                    </tbody></table>
                 </div>
             </div>
           </div>
@@ -268,29 +239,29 @@ const DeelPayrollApp: React.FC = () => {
     return (
         <div className="bg-gray-50 min-h-screen font-sans">
             <div className="container mx-auto p-4 sm:p-6 lg:p-8">
-                {!isAuthenticated ? renderAuthScreen() : renderDashboard()}
+                {isAuthenticated ? renderDashboard() : renderAuthScreen()}
             </div>
         </div>
     );
 };
 
-const StatCard: React.FC<{
+interface StatCardProps {
     title: string;
     value: string;
     diff?: DifferenceCalculation | null;
     isInt?: boolean;
-}> = ({ title, value, diff, isInt }) => {
-    
+}
+
+const StatCard: React.FC<StatCardProps> = ({ title, value, diff, isInt }) => {
     const diffString = useMemo(() => {
         if (!diff || diff.diff === 0) return null;
-        
         const prefix = diff.diff > 0 ? '+' : '';
-        const valueStr = isInt
-            ? diff.diff.toFixed(0)
-            : `$${diff.diff.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-            
+        const valueStr = isInt ? diff.diff.toFixed(0) : `$${diff.diff.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
         return `${prefix}${valueStr} (${diff.percentChange}%) vs last cycle`;
     }, [diff, isInt]);
+
+    const trendIcon = diff && diff.diff !== 0 ? (diff.diff > 0 ? <TrendingUp size={16} className="mr-1" /> : <TrendingDown size={16} className="mr-1" />) : null;
+    const diffClassName = `flex items-center mt-2 text-sm ${!diff || diff.diff === 0 ? '' : diff.diff > 0 ? 'text-green-600' : 'text-red-600'}`;
 
     return (
         <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
@@ -299,9 +270,9 @@ const StatCard: React.FC<{
                 <span>{title}</span>
             </div>
             <p className="text-3xl font-bold text-gray-800">{value}</p>
-            {diffString && diff && (
-                <div className={`flex items-center mt-2 text-sm ${diff.diff >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-                    {diff.diff >= 0 ? <TrendingUp size={16} className="mr-1" /> : <TrendingDown size={16} className="mr-1" />}
+            {diffString && (
+                <div className={diffClassName}>
+                    {trendIcon}
                     <span>{diffString}</span>
                 </div>
             )}
