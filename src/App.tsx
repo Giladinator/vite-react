@@ -261,3 +261,133 @@ const DeelPayrollApp: React.FC = () => {
             <legend className="text-sm font-medium text-gray-600 px-1">Comparison Period</legend>
              <div className="flex space-x-2">
                 <select value={month2} onChange={(e) => setMonth2(Number(e.target.value))} className="w-full px-4 py-3 rounded-lg border border-gray-300">
+                    {months.map(m => <option key={m.value} value={m.value}>{m.name}</option>)}
+                </select>
+                <select value={year2} onChange={(e) => setYear2(Number(e.target.value))} className="w-full px-4 py-3 rounded-lg border border-gray-300">
+                    {years.map(y => <option key={y} value={y}>{y}</option>)}
+                </select>
+            </div>
+        </fieldset>
+
+        <button
+          onClick={handleFetchData}
+          disabled={loading}
+          className="w-full bg-blue-600 text-white font-semibold py-3 px-4 rounded-lg hover:bg-blue-700 transition-all duration-200 flex items-center justify-center disabled:bg-blue-300"
+        >
+          {loading ? <><Loader2 className="animate-spin mr-2" size={20} />Connecting...</> : 'Connect & View Dashboard'}
+        </button>
+      </div>
+      {error && <div className="mt-4 text-center text-sm text-red-600 bg-red-50 p-3 rounded-lg flex items-center justify-center"><AlertCircle size={16} className="mr-2" />{error}</div>}
+      <p className="text-xs text-gray-400 mt-4 text-center">Your API key is not stored.</p>
+    </div>
+  );
+  
+  const renderDataView = (data: DashboardData, title: ViewType) => {
+    if (data.period1.count === 0 && !loading) return <div className="text-center text-gray-500 p-8">No payment data found for {data.period1.label} in {title}.</div>;
+
+    return (
+        <>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
+                <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
+                    <div className="flex items-center text-gray-500 mb-2"><DollarSign size={16} className="mr-2" /><span>Total Cost ({data.period1.label})</span></div>
+                    <p className="text-3xl font-bold text-gray-800">{formatCurrency(data.period1.totalCost)}</p>
+                    {data.costDiff && (
+                         <div className={`flex items-center mt-2 text-sm ${data.costDiff.diff >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                            {data.costDiff.diff >= 0 ? <TrendingUp size={16} className="mr-1" /> : <TrendingDown size={16} className="mr-1" />}
+                            <span>{data.costDiff.diff >= 0 ? '+' : ''}{formatCurrency(data.costDiff.diff)} ({data.costDiff.percentChange}%) vs {data.period2.label}</span>
+                        </div>
+                    )}
+                </div>
+                <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
+                    <div className="flex items-center text-gray-500 mb-2"><Users size={16} className="mr-2" /><span>Workers Paid ({data.period1.label})</span></div>
+                    <p className="text-3xl font-bold text-gray-800">{data.period1.count}</p>
+                     {data.countDiff && (
+                         <div className={`flex items-center mt-2 text-sm ${data.countDiff.diff >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                            {data.countDiff.diff >= 0 ? <TrendingUp size={16} className="mr-1" /> : <TrendingDown size={16} className="mr-1" />}
+                            <span>{data.countDiff.diff >= 0 ? '+' : ''}{data.countDiff.diff.toFixed(0)} workers ({data.countDiff.percentChange}%) vs {data.period2.label}</span>
+                        </div>
+                    )}
+                </div>
+            </div>
+            <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
+                <div className="p-6">
+                    <h3 className="text-xl font-semibold text-gray-800">{title} Payment Details ({data.period1.label})</h3>
+                </div>
+                <div className="overflow-x-auto">
+                    <table className="w-full text-sm text-left text-gray-500">
+                        <thead className="bg-gray-50 text-xs text-gray-700 uppercase">
+                            <tr>
+                                <th scope="col" className="px-6 py-3">Name</th>
+                                <th scope="col" className="px-6 py-3">Role</th>
+                                <th scope="col" className="px-6 py-3 text-right">Payment Amount</th>
+                                <th scope="col" className="px-6 py-3 text-center">Contract Status</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {data.period1.payments.map(p => (
+                                <tr key={p.contractId} className="bg-white border-b hover:bg-gray-50">
+                                    <th scope="row" className="px-6 py-4 font-medium text-gray-900 whitespace-nowrap">{p.name}</th>
+                                    <td className="px-6 py-4">{p.role}</td>
+                                    <td className="px-6 py-4 text-right font-semibold text-gray-800">{formatCurrency(p.amount)}</td>
+                                    <td className="px-6 py-4 text-center">
+                                        <span className={`px-3 py-1 rounded-full text-xs font-semibold ${p.status === 'in_progress' || p.status === 'active' ? 'bg-green-100 text-green-800' : 'bg-yellow-100 text-yellow-800'}`}>{p.status}</span>
+                                    </td>
+                                </tr>
+                            ))}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </>
+    );
+  };
+
+  const renderDashboard = () => (
+    <div className="w-full">
+      <header className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-8">
+        <div>
+          <h1 className="text-3xl font-bold text-gray-800">Global Workforce Dashboard</h1>
+          <p className="text-gray-500 mt-1">Viewing data for: {activeTab}</p>
+        </div>
+        <div className="flex items-center space-x-2 mt-4 sm:mt-0">
+          <button onClick={handleFetchData} disabled={loading} className="p-2 rounded-lg border bg-white hover:bg-gray-50 transition flex items-center justify-center disabled:opacity-50">
+            {loading ? <Loader2 className="animate-spin" size={20} /> : <RefreshCw size={20} />}
+          </button>
+        </div>
+      </header>
+
+      <div className="mb-8">
+        <div className="border-b border-gray-200">
+          <nav className="-mb-px flex space-x-8" aria-label="Tabs">
+            {(['EOR', 'PEO', 'Contractors'] as ViewType[]).map(tab => (
+              <button
+                key={tab}
+                onClick={() => setActiveTab(tab)}
+                className={`${activeTab === tab ? 'border-blue-500 text-blue-600' : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'} whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm`}
+              >
+                {tab}
+              </button>
+            ))}
+          </nav>
+        </div>
+      </div>
+      
+      <div className="mt-8">
+        {activeTab === 'EOR' && renderDataView(eorData, 'EOR')}
+        {activeTab === 'PEO' && renderDataView(peoData, 'PEO')}
+        {activeTab === 'Contractors' && renderDataView(contractorData, 'Contractors')}
+      </div>
+
+    </div>
+  );
+
+  return (
+    <div className="bg-gray-50 min-h-screen font-sans">
+      <div className="container mx-auto p-4 sm:p-6 lg:p-8">
+        {!isAuthenticated ? renderAuthScreen() : renderDashboard()}
+      </div>
+    </div>
+  );
+};
+
+export default DeelPayrollApp;
