@@ -179,3 +179,55 @@ const DeelPayrollApp: React.FC = () => {
         </div>
         <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
           <div className="flex items-center text-gray-500 mb-2">
+            <Users size={16} className="mr-2" />
+            <span>Total Employees ({activeTab})</span>
+          </div>
+          <p className="text-3xl font-bold text-gray-800">{dashboardData.employeeCount}</p>
+        </div>
+      </div>
+
+      <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
+        <div className="p-6">
+          <h3 className="text-xl font-semibold text-gray-800">Employee Payments</h3>
+          <p className="text-gray-500 mt-1">Detailed breakdown of payments for {activeTab} employees.</p>
+        </div>
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm text-left text-gray-500">
+            <thead className="bg-gray-50 text-xs text-gray-700 uppercase">
+              <tr>
+                <th scope="col" className="px-6 py-3">Employee</th>
+                <th scope="col" className="px-6 py-3">Role</th>
+                <th scope="col" className="px-6 py-3 text-right">Payment</th>
+                <th scope="col" className="px-6 py-3 text-center">Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              {dashboardData.employees.map(emp => (
+                <tr key={emp.id} className="bg-white border-b hover:bg-gray-50">
+                  <th scope="row" className="px-6 py-4 font-medium text-gray-900 whitespace-nowrap">{emp.name}</th>
+                  <td className="px-6 py-4">{emp.role}</td>
+                  <td className="px-6 py-4 text-right font-semibold text-gray-800">{formatCurrency(emp.net, emp.currency)}</td>
+                  <td className="px-6 py-4 text-center">
+                    <span className={`px-3 py-1 rounded-full text-xs font-semibold ${
+                      emp.status === 'active' ? 'bg-green-100 text-green-800' : 'bg-yellow-100 text-yellow-800'
+                    }`}>{emp.status}</span>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  );
+
+  return (
+    <div className="bg-gray-50 min-h-screen font-sans">
+      <div className="container mx-auto p-4 sm:p-6 lg:p-8">
+        {!isAuthenticated ? renderAuthScreen() : renderDashboard()}
+      </div>
+    </div>
+  );
+};
+
+export default DeelPayrollApp;
