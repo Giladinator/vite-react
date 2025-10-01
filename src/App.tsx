@@ -12,7 +12,6 @@ interface DeelContract {
   worker?: { full_name: string; };
 }
 
-// Corrected to match the provided JSON structure
 interface PaymentResponse {
   line_item: {
     amount: string;
@@ -112,9 +111,11 @@ const DeelPayrollApp: React.FC = () => {
     setError('');
 
     try {
-        const contracts = await callDeelApi<DeelContract[]>('/contracts', apiKey);
+        // The /contracts endpoint nests the response in a 'data' property
+        const contractResponse = await callDeelApi<{ data: DeelContract[] }>('/contracts', apiKey);
+        const contracts = contractResponse.data || [];
         console.log("--- Fetched Contracts ---", contracts);
-        setAllContracts(contracts || []);
+        setAllContracts(contracts);
 
         const period1Start = new Date(year1, month1, 1).toISOString();
         const period1End = new Date(year1, month1 + 1, 0, 23, 59, 59, 999).toISOString();
@@ -152,25 +153,18 @@ const DeelPayrollApp: React.FC = () => {
     return { diff, percentChange };
   };
 
-  // Rewritten data processing logic
+  // --- REWRITTEN DATA PROCESSING LOGIC ---
   const { eorData, peoData, contractorData } = useMemo(() => {
     const processDashboardData = (contracts: DeelContract[]): DashboardData => {
       const contractIds = new Set(contracts.map(c => c.id));
 
       const processPayments = (payments: PaymentResponse[], year: number, month: number) => {
-          // Correctly filter payments based on the contract ID from the nested object
           const filteredPayments = payments.filter(p => contractIds.has(p.contract.id));
-          
-          const totalCost = filteredPayments.reduce((acc, p) => {
-              // Remove commas before parsing the amount
-              const amount = parseFloat(p.line_item.amount.replace(/,/g, ''));
-              return acc + (isNaN(amount) ? 0 : amount);
-          }, 0);
+          const totalCost = filteredPayments.reduce((acc, p) => acc + parseFloat(p.line_item.amount.replace(/,/g, '')), 0);
           
           const paymentsByContract = filteredPayments.reduce((acc, p) => {
               const amount = parseFloat(p.line_item.amount.replace(/,/g, ''));
               if (!isNaN(amount)) {
-                // Use correct contract ID from the nested object
                 acc[p.contract.id] = (acc[p.contract.id] || 0) + amount;
               }
               return acc;
