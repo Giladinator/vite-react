@@ -3,13 +3,12 @@ import { AlertCircle, DollarSign, Loader2, RefreshCw, Users, TrendingUp, Trendin
 import { callDeelApi } from './services/deelApiService';
 
 // --- Type Definitions for API Responses ---
-// CORRECTED: Interface now matches the sample API response
 interface DeelContract {
   id: string;
-  title: string; // Was 'name'
-  type: 'eor' | 'peo' | 'ongoing_time_based' | 'pay_as_you_go_time_based' | 'milestones' | 'fixed_rate'; // Was 'contract_type'
+  title: string;
+  type: 'eor' | 'peo' | 'ongoing_time_based' | 'pay_as_you_go_time_based' | 'milestones' | 'fixed_rate';
   status: string;
-  job_title_name?: string; // Make optional as it's not in the sample
+  job_title_name?: string;
   worker?: { full_name: string; };
 }
 
@@ -84,25 +83,48 @@ const DeelPayrollApp: React.FC = () => {
   const [year2, setYear2] = useState(new Date(new Date().setMonth(new Date().getMonth() - 1)).getFullYear());
   const [month2, setMonth2] = useState(new Date(new Date().setMonth(new Date().getMonth() - 1)).getMonth());
 
-  const fetchAllPaginatedData = async (params: Record<string, string>): Promise<PaymentResponse[]> => {
+  const fetchAllPaginatedData = async (fromDate: string, toDate: string): Promise<PaymentResponse[]> => {
     let allData: PaymentResponse[] = [];
     let offset = 0;
     const limit = 50;
     let hasMore = true;
 
+    console.log(`Fetching payments from ${fromDate} to ${toDate}`);
+
     while(hasMore) {
-        const queryParams = new URLSearchParams(params);
-        const url = `/reports/detailed-payments?limit=${limit}&offset=${offset}&${queryParams.toString()}`;
-        const pageData = await callDeelApi<PaymentResponse[]>(url, apiKey);
-        
-        if (pageData && pageData.length > 0) {
-            allData = [...allData, ...pageData];
-            offset += pageData.length;
-            if (pageData.length < limit) hasMore = false;
-        } else {
+        try {
+            // Build URL with proper query parameters
+            const url = `/reports/detailed-payments?limit=${limit}&offset=${offset}&from_date=${encodeURIComponent(fromDate)}&to_date=${encodeURIComponent(toDate)}`;
+            console.log(`Fetching page at offset ${offset}: ${url}`);
+            
+            const response = await callDeelApi<{ data?: PaymentResponse[] } | PaymentResponse[]>(url, apiKey);
+            
+            // Handle both response formats (wrapped in data or direct array)
+            let pageData: PaymentResponse[] = [];
+            if (Array.isArray(response)) {
+                pageData = response;
+            } else if (response && 'data' in response && Array.isArray(response.data)) {
+                pageData = response.data;
+            }
+            
+            console.log(`Received ${pageData.length} payments at offset ${offset}`);
+            
+            if (pageData && pageData.length > 0) {
+                allData = [...allData, ...pageData];
+                offset += pageData.length;
+                if (pageData.length < limit) {
+                    hasMore = false;
+                }
+            } else {
+                hasMore = false;
+            }
+        } catch (err) {
+            console.error(`Error fetching page at offset ${offset}:`, err);
             hasMore = false;
         }
     }
+    
+    console.log(`Total payments fetched: ${allData.length}`);
     return allData;
   };
 
@@ -115,29 +137,43 @@ const DeelPayrollApp: React.FC = () => {
     setError('');
 
     try {
+        // Fetch contracts
+        console.log("Fetching contracts...");
         const contractResponse = await callDeelApi<{ data: DeelContract[] }>('/contracts', apiKey);
         const contracts = contractResponse.data || [];
-        console.log("--- Fetched Contracts ---", contracts);
+        console.log(`Fetched ${contracts.length} contracts:`, contracts);
         setAllContracts(contracts);
 
-        const period1Start = new Date(year1, month1, 1).toISOString();
-        const period1End = new Date(year1, month1 + 1, 0, 23, 59, 59, 999).toISOString();
-        const period2Start = new Date(year2, month2, 1).toISOString();
-        const period2End = new Date(year2, month2 + 1, 0, 23, 59, 59, 999).toISOString();
+        // Format dates as YYYY-MM-DD for better API compatibility
+        const period1Start = `${year1}-${String(month1 + 1).padStart(2, '0')}-01`;
+        const period1End = new Date(year1, month1 + 1, 0).toISOString().split('T')[0];
+        const period2Start = `${year2}-${String(month2 + 1).padStart(2, '0')}-01`;
+        const period2End = new Date(year2, month2 + 1, 0).toISOString().split('T')[0];
 
+        console.log(`Period 1: ${period1Start} to ${period1End}`);
+        console.log(`Period 2: ${period2Start} to ${period2End}`);
+
+        // Fetch payments for both periods
         const [p1Payments, p2Payments] = await Promise.all([
-            fetchAllPaginatedData({ from_date: period1Start, to_date: period1End }),
-            fetchAllPaginatedData({ from_date: period2Start, to_date: period2End })
+            fetchAllPaginatedData(period1Start, period1End),
+            fetchAllPaginatedData(period2Start, period2End)
         ]);
         
-        console.log(`--- Payments for ${months[month1].name} ${year1} ---`, p1Payments);
-        console.log(`--- Payments for ${months[month2].name} ${year2} ---`, p2Payments);
+        console.log(`Period 1 (${months[month1].name} ${year1}): ${p1Payments.length} payments`, p1Payments);
+        console.log(`Period 2 (${months[month2].name} ${year2}): ${p2Payments.length} payments`, p2Payments);
         
         setPeriod1Payments(p1Payments);
         setPeriod2Payments(p2Payments);
 
+        if (contracts.length === 0) {
+            setError('No contracts found. Please check your API key and account.');
+        } else if (p1Payments.length === 0 && p2Payments.length === 0) {
+            setError('No payment data found for the selected periods. Try different date ranges.');
+        }
+
         setIsAuthenticated(true);
     } catch (err: any) {
+      console.error('Error fetching data:', err);
       setError(err.message || 'An error occurred while fetching data.');
       setIsAuthenticated(false);
     } finally {
@@ -157,12 +193,30 @@ const DeelPayrollApp: React.FC = () => {
   };
 
   const { eorData, peoData, contractorData } = useMemo(() => {
+    console.log('Computing dashboard data...');
+    console.log(`Total contracts: ${allContracts.length}`);
+    console.log(`Period 1 payments: ${period1Payments.length}`);
+    console.log(`Period 2 payments: ${period2Payments.length}`);
+
     const processDashboardData = (contracts: DeelContract[]): DashboardData => {
       const contractIds = new Set(contracts.map(c => c.id));
+      console.log(`Processing ${contracts.length} contracts with IDs:`, Array.from(contractIds));
 
       const processPayments = (payments: PaymentResponse[], year: number, month: number) => {
-          const filteredPayments = payments.filter(p => contractIds.has(p.contract.id));
-          const totalCost = filteredPayments.reduce((acc, p) => acc + parseFloat(p.line_item.amount.replace(/,/g, '')), 0);
+          const filteredPayments = payments.filter(p => {
+              const hasContract = contractIds.has(p.contract.id);
+              if (!hasContract) {
+                  console.log(`Payment for contract ${p.contract.id} not in filtered contract list`);
+              }
+              return hasContract;
+          });
+          
+          console.log(`Filtered ${filteredPayments.length} payments from ${payments.length} total`);
+          
+          const totalCost = filteredPayments.reduce((acc, p) => {
+              const amount = parseFloat(p.line_item.amount.replace(/,/g, ''));
+              return acc + (isNaN(amount) ? 0 : amount);
+          }, 0);
           
           const paymentsByContract = filteredPayments.reduce((acc, p) => {
               const amount = parseFloat(p.line_item.amount.replace(/,/g, ''));
@@ -183,6 +237,8 @@ const DeelPayrollApp: React.FC = () => {
               }
           });
           
+          console.log(`Processed ${employeePayments.length} employee payments, total cost: ${totalCost}`);
+          
           return { 
               totalCost, 
               count: employeePayments.length, 
@@ -202,10 +258,20 @@ const DeelPayrollApp: React.FC = () => {
       };
     };
 
+    const eorContracts = allContracts.filter(c => c.type === 'eor');
+    const peoContracts = allContracts.filter(c => c.type === 'peo');
+    const contractorContracts = allContracts.filter(c => 
+        ['ongoing_time_based', 'pay_as_you_go_time_based', 'milestones', 'fixed_rate'].includes(c.type)
+    );
+
+    console.log(`EOR contracts: ${eorContracts.length}`);
+    console.log(`PEO contracts: ${peoContracts.length}`);
+    console.log(`Contractor contracts: ${contractorContracts.length}`);
+
     return {
-        eorData: processDashboardData(allContracts.filter(c => c.type === 'eor')),
-        peoData: processDashboardData(allContracts.filter(c => c.type === 'peo')),
-        contractorData: processDashboardData(allContracts.filter(c => ['ongoing_time_based', 'pay_as_you_go_time_based', 'milestones', 'fixed_rate'].includes(c.type)))
+        eorData: processDashboardData(eorContracts),
+        peoData: processDashboardData(peoContracts),
+        contractorData: processDashboardData(contractorContracts)
     };
   }, [allContracts, period1Payments, period2Payments, year1, month1, year2, month2]);
 
@@ -261,7 +327,19 @@ const DeelPayrollApp: React.FC = () => {
   );
   
   const renderDataView = (data: DashboardData, title: ViewType) => {
-    if (data.period1.count === 0 && !loading) return <div className="text-center text-gray-500 p-8">No payment data found for {data.period1.label} in {title}.</div>;
+    if (data.period1.count === 0 && !loading) {
+        return (
+            <div className="text-center text-gray-500 p-8 bg-white rounded-2xl shadow-sm border border-gray-100">
+                <p className="text-lg">No payment data found for {data.period1.label} in {title}.</p>
+                <p className="text-sm mt-2">This could mean:</p>
+                <ul className="text-sm mt-2 space-y-1">
+                    <li>• No payments were made in this period</li>
+                    <li>• No {title} contracts exist in your account</li>
+                    <li>• The selected date range has no activity</li>
+                </ul>
+            </div>
+        );
+    }
 
     return (
         <>
