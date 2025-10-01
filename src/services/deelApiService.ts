@@ -2,7 +2,7 @@ import axios from 'axios';
 
 // Create a configured instance of axios for the Deel API
 const deelApi = axios.create({
-  baseURL: 'https://api-sandbox.demo.deel.com/rest/v2', // Production API URL
+  baseURL: 'https://api-sandbox.demo.deel.com/rest/v2', // Corrected to sandbox URL
   headers: {
     'Content-Type': 'application/json',
   },
@@ -22,22 +22,18 @@ export const callDeelApi = async <T>(endpoint: string, apiKey: string): Promise<
                 'Authorization': `Bearer ${apiKey}`,
             }
         });
-        // The API response for a list is often nested in a 'data' property
-        return response.data.data ? response.data.data as T : response.data as T;
+        // SIMPLIFIED: Always return the main data object from the response.
+        // The component will be responsible for handling nested 'data' properties if they exist.
+        return response.data as T;
     } catch (error: any) {
         if (error.response) {
-            // The request was made and the server responded with a status code
-            // that falls out of the range of 2xx
             console.error('Deel API Error:', error.response.status, error.response.data);
-            // Attempt to extract the specific error message from the API response
             const errorMessage = error.response.data?.errors?.[0]?.message || `API error: ${error.response.status}`;
             throw new Error(errorMessage);
         } else if (error.request) {
-            // The request was made but no response was received
             console.error('Deel API Error: No response received', error.request);
             throw new Error('Failed to fetch data from Deel API. No response received.');
         } else {
-            // Something happened in setting up the request that triggered an Error
             console.error('Error', error.message);
             throw new Error('An unknown error occurred while setting up the API request.');
         }
