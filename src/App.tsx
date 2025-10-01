@@ -16,6 +16,7 @@ interface Payment {
   id: string;
   contract_id: string;
   amount: string;
+  // Add other relevant payment fields if needed
 }
 
 // --- Type Definitions for Application State ---
@@ -109,9 +110,10 @@ const DeelPayrollApp: React.FC = () => {
 
     try {
         const contracts = await callDeelApi<DeelContract[]>('/contracts', apiKey);
+        // --- ADDED FOR DEBUGGING ---
+        console.log("--- Fetched Contracts ---", contracts);
         setAllContracts(contracts || []);
 
-        // Use selected dates to create ranges
         const period1Start = new Date(year1, month1, 1).toISOString();
         const period1End = new Date(year1, month1 + 1, 0, 23, 59, 59, 999).toISOString();
         const period2Start = new Date(year2, month2, 1).toISOString();
@@ -121,6 +123,10 @@ const DeelPayrollApp: React.FC = () => {
             fetchAllPaginatedData({ from_date: period1Start, to_date: period1End }),
             fetchAllPaginatedData({ from_date: period2Start, to_date: period2End })
         ]);
+        
+        // --- ADDED FOR DEBUGGING ---
+        console.log(`--- Payments for ${months[month1].name} ${year1} ---`, p1Payments);
+        console.log(`--- Payments for ${months[month2].name} ${year2} ---`, p2Payments);
         
         setPeriod1Payments(p1Payments);
         setPeriod2Payments(p2Payments);
@@ -205,7 +211,6 @@ const DeelPayrollApp: React.FC = () => {
           className="w-full px-4 py-3 rounded-lg border border-gray-300 focus:outline-none focus:ring-2 focus:ring-blue-500 transition"
         />
 
-        {/* --- Date Selection UI --- */}
         <fieldset className="border border-gray-200 p-4 rounded-lg">
             <legend className="text-sm font-medium text-gray-600 px-1">Primary Period</legend>
             <div className="flex space-x-2">
