@@ -3,33 +3,13 @@ import { AlertCircle, DollarSign, Loader2, RefreshCw, Users } from 'lucide-react
 import { callDeelApi } from './services/deelApiService';
 
 // --- Type Definitions for API Responses ---
-interface DeelPayrollReport {
-  id: string;
-  start_date: string;
-  end_date: string;
-  total: string;
-  employees_count: number;
-}
-
-interface DeelPayslip {
-  id: string;
-  employee_name: string;
-  country: string;
-  net_pay: string;
-  status: string;
-  // Assuming contract type might not be directly available, making it optional
-  contract?: {
-    contract_type?: 'eor' | 'peo';
-  }
-}
-
 interface DeelContract {
   id: string;
   name: string;
   job_title_name: string;
   status: string;
-  contract_type: 'ongoing_time_based' | 'pay_as_you_go_time_based' | 'milestones' | 'fixed_rate';
-  compensation_details: {
+  contract_type: 'eor' | 'peo' | 'ongoing_time_based' | 'pay_as_you_go_time_based' | 'milestones' | 'fixed_rate';
+  compensation_details?: { // Make optional to handle cases where it might be missing
     amount: number;
     currency: string;
   };
@@ -44,23 +24,12 @@ type ViewType = 'EOR' | 'PEO' | 'Contractors';
 interface Employee {
   id: string;
   name: string;
-  roleOrCountry: string;
-  net: number;
-  currencyOrStatus: string;
+  role: string;
+  status: string;
+  compensation: string;
 }
 
-interface PayrollCycle {
-  cycle: string;
-  totalCost: number;
-  employeeCount: number;
-  employees: Employee[];
-}
-
-interface PayrollData {
-  current: PayrollCycle;
-}
-
-interface ContractorData {
+interface DashboardData {
     totalCost: number;
     count: number;
     employees: Employee[];
@@ -72,9 +41,7 @@ const DeelPayrollApp: React.FC = () => {
   const [loading, setLoading] = useState<boolean>(false);
   const [error, setError] = useState<string>('');
   
-  const [allPayslips, setAllPayslips] = useState<DeelPayslip[]>([]);
-  const [payrollReports, setPayrollReports] = useState<DeelPayrollReport[]>([]);
-  const [contractorContracts, setContractorContracts] = useState<DeelContract[]>([]);
+  const [allContracts, setAllContracts] = useState<DeelContract[]>([]);
   const [activeTab, setActiveTab] = useState<ViewType>('EOR');
 
   const handleFetchData = async () => {
@@ -84,77 +51,42 @@ const DeelPayrollApp: React.FC = () => {
     }
     setLoading(true);
     setError('');
+    setAllContracts([]);
 
     try {
-      // Fetch all data sources in parallel
-      const [reports, contracts] = await Promise.all([
-        callDeelApi<DeelPayrollReport[]>('/gp/reports', apiKey).catch(() => []), // Add catch to prevent full failure
-        callDeelApi<DeelContract[]>('/contracts', apiKey).catch(() => [])
-      ]);
-      
-      if (reports && reports.length > 0) {
-        setPayrollReports(reports);
-        const currentReport = reports[0];
-        // Fetch payslips for the most recent report
-        const payslips = await callDeelApi<DeelPayslip[]>(`/gp/reports/${currentReport.id}/payslips`, apiKey);
-        setAllPayslips(payslips || []);
-      }
-
-      if (contracts) {
-          const filtered = contracts.filter(c => ['ongoing_time_based', 'pay_as_you_go_time_based', 'milestones', 'fixed_rate'].includes(c.contract_type));
-          setContractorContracts(filtered);
-      }
-
+      const contracts = await callDeelApi<DeelContract[]>('/contracts', apiKey);
+      setAllContracts(contracts || []);
       setIsAuthenticated(true);
     } catch (err: any) {
-      setError(err.message || 'An unknown error occurred.');
+      setError(err.message || 'An unknown error occurred while fetching contracts.');
       setIsAuthenticated(false);
     } finally {
       setLoading(false);
     }
   };
   
-  const formatCycle = (report: DeelPayrollReport, payslips: DeelPayslip[]): PayrollCycle => {
-    const totalCost = payslips.reduce((acc, p) => acc + parseFloat(p.net_pay || '0'), 0);
-    return {
-        cycle: `${new Date(report.start_date + 'T00:00:00Z').toLocaleString('default', { month: 'long', timeZone: 'UTC' })} ${new Date(report.start_date + 'T00:00:00Z').getUTCFullYear()}`,
-        totalCost: totalCost,
-        employeeCount: payslips.length,
-        employees: payslips.map(p => ({
-            id: p.id,
-            name: p.employee_name,
-            roleOrCountry: p.country,
-            net: parseFloat(p.net_pay || '0'),
-            currencyOrStatus: (p.status.charAt(0).toUpperCase() + p.status.slice(1)),
-        })),
-    }
-  };
+  const formatCurrency = (value: number, currency: string) => 
+    value.toLocaleString(undefined, { style: 'currency', currency, minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
-  // EOR data is filtered from all payslips. Lacking a direct type field, we'll assume it's the default.
-  // This is a common ambiguity in APIs. For now, we show all GP payslips under EOR.
-  const eorData = useMemo<PayrollData | null>(() => {
-    if (!payrollReports.length) return null;
-    return {
-        current: formatCycle(payrollReports[0], allPayslips),
-    };
-  }, [allPayslips, payrollReports]);
-  
-  // PEO data is not available from the Global Payroll endpoint, so we show a placeholder.
-  const peoData = null; 
-  
-  const contractorData = useMemo<ContractorData>(() => {
-    const employees: Employee[] = contractorContracts.map(c => ({
+  const processContracts = (contracts: DeelContract[]): DashboardData => {
+    const employees: Employee[] = contracts.map(c => ({
         id: c.id,
         name: c.worker?.full_name || c.name,
-        roleOrCountry: c.job_title_name || 'N/A',
-        net: c.compensation_details?.amount || 0,
-        currencyOrStatus: c.status,
+        role: c.job_title_name || 'N/A',
+        status: c.status,
+        compensation: c.compensation_details 
+            ? formatCurrency(c.compensation_details.amount, c.compensation_details.currency)
+            : 'N/A',
     }));
-    const totalCost = employees.reduce((acc, emp) => acc + (emp.net || 0), 0);
-    return { totalCost, count: employees.length, employees };
-  }, [contractorContracts]);
 
-  const formatCurrency = (value: number) => value.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    const totalCost = contracts.reduce((acc, c) => acc + (c.compensation_details?.amount || 0), 0);
+    
+    return { totalCost, count: employees.length, employees };
+  };
+
+  const eorData = useMemo(() => processContracts(allContracts.filter(c => c.contract_type === 'eor')), [allContracts]);
+  const peoData = useMemo(() => processContracts(allContracts.filter(c => c.contract_type === 'peo')), [allContracts]);
+  const contractorData = useMemo(() => processContracts(allContracts.filter(c => ['ongoing_time_based', 'pay_as_you_go_time_based', 'milestones', 'fixed_rate'].includes(c.contract_type))), [allContracts]);
 
   const renderAuthScreen = () => (
     <div className="w-full max-w-md mx-auto bg-white p-8 rounded-2xl shadow-lg border border-gray-100">
@@ -181,44 +113,45 @@ const DeelPayrollApp: React.FC = () => {
     </div>
   );
   
-  const renderPayrollView = (data: PayrollData | null, title: string) => {
-    if (!data || data.current.employeeCount === 0) return <div className="text-center text-gray-500 p-8">No {title} payroll data found for the latest cycle.</div>;
+  const renderDataView = (data: DashboardData, title: ViewType) => {
+    if (data.count === 0) return <div className="text-center text-gray-500 p-8">No {title} data found.</div>;
 
     return (
         <>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
                 <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
                     <div className="flex items-center text-gray-500 mb-2"><DollarSign size={16} className="mr-2" /><span>Total Cost ({title})</span></div>
-                    <p className="text-3xl font-bold text-gray-800">${formatCurrency(data.current.totalCost)}</p>
+                    {/* Note: Total cost for different currencies is summed up without conversion */}
+                    <p className="text-3xl font-bold text-gray-800">${data.totalCost.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</p>
                 </div>
                 <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
-                    <div className="flex items-center text-gray-500 mb-2"><Users size={16} className="mr-2" /><span>Employees Paid ({title})</span></div>
-                    <p className="text-3xl font-bold text-gray-800">{data.current.employeeCount}</p>
+                    <div className="flex items-center text-gray-500 mb-2"><Users size={16} className="mr-2" /><span>Total Workers ({title})</span></div>
+                    <p className="text-3xl font-bold text-gray-800">{data.count}</p>
                 </div>
             </div>
             <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
                 <div className="p-6">
-                    <h3 className="text-xl font-semibold text-gray-800">{title} Payments</h3>
-                    <p className="text-gray-500 mt-1">Detailed breakdown for the {data.current.cycle} cycle.</p>
+                    <h3 className="text-xl font-semibold text-gray-800">{title} Details</h3>
+                    <p className="text-gray-500 mt-1">List of active {title.toLowerCase()} and their compensation.</p>
                 </div>
                 <div className="overflow-x-auto">
                     <table className="w-full text-sm text-left text-gray-500">
                         <thead className="bg-gray-50 text-xs text-gray-700 uppercase">
                             <tr>
-                                <th scope="col" className="px-6 py-3">Employee</th>
-                                <th scope="col" className="px-6 py-3">Country</th>
-                                <th scope="col" className="px-6 py-3 text-right">Net Payment</th>
-                                <th scope="col" className="px-6 py-3 text-center">Status</th>
+                                <th scope="col" className="px-6 py-3">Name</th>
+                                <th scope="col" className="px-6 py-3">Role</th>
+                                <th scope="col" className="px-6 py-3 text-right">Compensation</th>
+                                <th scope="col" className="px-6 py-3 text-center">Contract Status</th>
                             </tr>
                         </thead>
                         <tbody>
-                            {data.current.employees.map(emp => (
+                            {data.employees.map(emp => (
                                 <tr key={emp.id} className="bg-white border-b hover:bg-gray-50">
                                     <th scope="row" className="px-6 py-4 font-medium text-gray-900 whitespace-nowrap">{emp.name}</th>
-                                    <td className="px-6 py-4">{emp.roleOrCountry}</td>
-                                    <td className="px-6 py-4 text-right font-semibold text-gray-800">${formatCurrency(emp.net)}</td>
+                                    <td className="px-6 py-4">{emp.role}</td>
+                                    <td className="px-6 py-4 text-right font-semibold text-gray-800">{emp.compensation}</td>
                                     <td className="px-6 py-4 text-center">
-                                        <span className={`px-3 py-1 rounded-full text-xs font-semibold ${emp.currencyOrStatus === 'Paid' || emp.currencyOrStatus === 'Completed' ? 'bg-green-100 text-green-800' : 'bg-yellow-100 text-yellow-800'}`}>{emp.currencyOrStatus}</span>
+                                        <span className={`px-3 py-1 rounded-full text-xs font-semibold ${emp.status === 'in_progress' || emp.status === 'active' ? 'bg-green-100 text-green-800' : 'bg-yellow-100 text-yellow-800'}`}>{emp.status}</span>
                                     </td>
                                 </tr>
                             ))}
@@ -230,59 +163,11 @@ const DeelPayrollApp: React.FC = () => {
     );
   };
 
-  const renderContractorView = () => {
-    if (contractorData.count === 0) return <div className="text-center text-gray-500 p-8">No contractor data found.</div>;
-    return (
-    <>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
-            <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
-                <div className="flex items-center text-gray-500 mb-2"><DollarSign size={16} className="mr-2" /><span>Total Contractor Cost</span></div>
-                <p className="text-3xl font-bold text-gray-800">${formatCurrency(contractorData.totalCost)}</p>
-            </div>
-            <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
-                <div className="flex items-center text-gray-500 mb-2"><Users size={16} className="mr-2" /><span>Total Contractors</span></div>
-                <p className="text-3xl font-bold text-gray-800">{contractorData.count}</p>
-            </div>
-        </div>
-        <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
-            <div className="p-6">
-                <h3 className="text-xl font-semibold text-gray-800">Contractor Details</h3>
-                <p className="text-gray-500 mt-1">List of active contractors and their compensation.</p>
-            </div>
-            <div className="overflow-x-auto">
-                <table className="w-full text-sm text-left text-gray-500">
-                    <thead className="bg-gray-50 text-xs text-gray-700 uppercase">
-                        <tr>
-                            <th scope="col" className="px-6 py-3">Contractor</th>
-                            <th scope="col" className="px-6 py-3">Role</th>
-                            <th scope="col" className="px-6 py-3 text-right">Payment</th>
-                            <th scope="col" className="px-6 py-3 text-center">Contract Status</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {contractorData.employees.map(emp => (
-                            <tr key={emp.id} className="bg-white border-b hover:bg-gray-50">
-                                <th scope="row" className="px-6 py-4 font-medium text-gray-900 whitespace-nowrap">{emp.name}</th>
-                                <td className="px-6 py-4">{emp.roleOrCountry}</td>
-                                <td className="px-6 py-4 text-right font-semibold text-gray-800">${formatCurrency(emp.net)}</td>
-                                <td className="px-6 py-4 text-center">
-                                    <span className={`px-3 py-1 rounded-full text-xs font-semibold ${emp.currencyOrStatus === 'in_progress' || emp.currencyOrStatus === 'active' ? 'bg-green-100 text-green-800' : 'bg-yellow-100 text-yellow-800'}`}>{emp.currencyOrStatus}</span>
-                                </td>
-                            </tr>
-                        ))}
-                    </tbody>
-                </table>
-            </div>
-        </div>
-    </>
-    );
-};
-
   const renderDashboard = () => (
     <div className="w-full">
       <header className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-8">
         <div>
-          <h1 className="text-3xl font-bold text-gray-800">Global Payroll Dashboard</h1>
+          <h1 className="text-3xl font-bold text-gray-800">Global Workforce Dashboard</h1>
           <p className="text-gray-500 mt-1">Viewing data for: {activeTab}</p>
         </div>
         <div className="flex items-center space-x-2 mt-4 sm:mt-0">
@@ -309,9 +194,9 @@ const DeelPayrollApp: React.FC = () => {
       </div>
       
       <div className="mt-8">
-        {activeTab === 'EOR' && renderPayrollView(eorData, 'EOR')}
-        {activeTab === 'PEO' && renderPayrollView(peoData, 'PEO')}
-        {activeTab === 'Contractors' && renderContractorView()}
+        {activeTab === 'EOR' && renderDataView(eorData, 'EOR')}
+        {activeTab === 'PEO' && renderDataView(peoData, 'PEO')}
+        {activeTab === 'Contractors' && renderDataView(contractorData, 'Contractors')}
       </div>
 
     </div>
